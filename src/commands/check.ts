@@ -57,7 +57,7 @@ export async function runCheck(): Promise<void> {
     fail('TMDB_API_KEY not set in .env')
     ok = false
   } else {
-    const tmdb = new TmdbClient(tmdbKey)
+    const tmdb = new TmdbClient(tmdbKey, 'en-US')
     if (await tmdb.validateApiKey()) {
       pass('TMDB API key valid')
     } else {

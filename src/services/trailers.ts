@@ -20,9 +20,9 @@ export class TrailerService {
   private cache: TrailerCache
   private tmdb: TmdbClient
 
-  constructor(cacheDir: string, tmdbApiKey: string) {
+  constructor(cacheDir: string, tmdbApiKey: string, language: string) {
     this.cache = new TrailerCache(cacheDir)
-    this.tmdb = new TmdbClient(tmdbApiKey)
+    this.tmdb = new TmdbClient(tmdbApiKey, language)
   }
 
   async init(): Promise<void> {

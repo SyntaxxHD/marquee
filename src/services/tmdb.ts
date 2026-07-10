@@ -20,15 +20,17 @@ function shuffle<T>(arr: T[]): T[] {
 
 export class TmdbClient {
   private client: TMDB
+  private language: string
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, language: string) {
     this.client = new TMDB(apiKey)
+    this.language = language
   }
 
   async getTrendingMovies(): Promise<TmdbMovie[]> {
     try {
       const result = await this.client.trending.trending('movie', 'week', {
-        language: 'de-DE' as AvailableLanguage
+        language: this.language as AvailableLanguage
       })
       return shuffle(
         result.results.map(m => ({
@@ -62,9 +64,9 @@ export class TmdbClient {
       }
     }
 
-    const key = await tryFetch('de-DE' as AvailableLanguage)
+    const key = await tryFetch(this.language as AvailableLanguage)
     if (key) return key
-    logger.debug(`No DE trailer for "${title}", trying fallback`)
+    logger.debug(`No ${this.language} trailer for "${title}", trying fallback`)
     return tryFetch()
   }
 

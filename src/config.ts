@@ -14,6 +14,7 @@ export interface AppleTVConfig {
 
 export interface UserConfig {
   appleTV: AppleTVConfig | null
+  language: string
   outputResolution: OutputResolution
   outputFps: OutputFps
   hue: {
@@ -29,6 +30,7 @@ export interface Config {
   outputDir: string
   cacheDir: string
   appleTV: AppleTVConfig | null
+  language: string
   outputResolution: OutputResolution
   outputFps: OutputFps
   hue: UserConfig['hue']
@@ -83,6 +85,7 @@ export async function loadConfig(): Promise<Config> {
     outputDir,
     cacheDir: CACHE_DIR,
     appleTV: userConfig.appleTV,
+    language: userConfig.language ?? 'de-DE',
     outputResolution: userConfig.outputResolution,
     outputFps: userConfig.outputFps,
     hue: userConfig.hue

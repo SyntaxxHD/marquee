@@ -23,7 +23,11 @@ export async function runBuild(): Promise<BuildResult> {
   ads.forEach((ad, i) => logger.step(i + 1, ads.length, ad.fileName))
 
   logger.info('🎥 Fetching 3 trailers...')
-  const trailerService = new TrailerService(config.cacheDir, config.tmdbApiKey)
+  const trailerService = new TrailerService(
+    config.cacheDir,
+    config.tmdbApiKey,
+    config.language
+  )
   await trailerService.init()
   const trailers = await trailerService.fetchTrailers(3)
 

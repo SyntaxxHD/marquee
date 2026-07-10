@@ -14,6 +14,17 @@ const QUALITY_OPTIONS = [
   { title: '4K 60fps     (UHD — slow to encode)', value: '3840x2160@60' }
 ]
 
+const LANGUAGE_OPTIONS = [
+  { title: '🇩🇪 Deutsch', value: 'de-DE' },
+  { title: '🇬🇧 English', value: 'en-GB' },
+  { title: '🇪🇸 Español', value: 'es-ES' },
+  { title: '🇫🇷 Français', value: 'fr-FR' },
+  { title: '🇮🇹 Italiano', value: 'it-IT' },
+  { title: '🇵🇹 Português', value: 'pt-PT' },
+  { title: '🇳🇱 Nederlands', value: 'nl-NL' },
+  { title: '🇯🇵 日本語', value: 'ja-JP' }
+]
+
 export async function runSetup(): Promise<void> {
   console.log(chalk.bold.cyan('\n🎬 marquee — setup wizard\n'))
 
@@ -32,6 +43,18 @@ export async function runSetup(): Promise<void> {
   const outputResolution = resolution as OutputResolution
   const outputFps = Number(fps) as OutputFps
 
+  const languageRes = await prompts({
+    type: 'select',
+    name: 'language',
+    message: 'Trailer language:',
+    choices: LANGUAGE_OPTIONS,
+    initial: 0
+  })
+
+  if (!languageRes.language) throw new MarqueeError('Setup cancelled.')
+
+  const language = languageRes.language as string
+
   const hueRes = await prompts({
     type: 'confirm',
     name: 'setupHue',
@@ -45,7 +68,7 @@ export async function runSetup(): Promise<void> {
     hue = await setupHue()
   }
 
-  const config: UserConfig = { appleTV, outputResolution, outputFps, hue }
+  const config: UserConfig = { appleTV, language, outputResolution, outputFps, hue }
   await saveUserConfig(config)
 
   console.log()

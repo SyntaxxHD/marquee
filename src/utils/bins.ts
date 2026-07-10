@@ -25,6 +25,21 @@ async function ensureBin(embeddedPath: string, name: string): Promise<string> {
 }
 
 async function resolveStandalone(): Promise<Bins> {
+  if (IS_WIN) {
+    const [ff, fp, yt, atv] = await Promise.all([
+      import('../../vendor/ffmpeg.exe' as string, { with: { type: 'file' } }),
+      import('../../vendor/ffprobe.exe' as string, { with: { type: 'file' } }),
+      import('../../vendor/yt-dlp.exe' as string, { with: { type: 'file' } }),
+      import('../../vendor/atvremote.exe' as string, { with: { type: 'file' } })
+    ])
+    return {
+      ffmpeg: await ensureBin(ff.default, 'ffmpeg'),
+      ffprobe: await ensureBin(fp.default, 'ffprobe'),
+      ytDlp: await ensureBin(yt.default, 'yt-dlp'),
+      atvremote: await ensureBin(atv.default, 'atvremote')
+    }
+  }
+
   const [ff, fp, yt, atv] = await Promise.all([
     import('../../vendor/ffmpeg' as string, { with: { type: 'file' } }),
     import('../../vendor/ffprobe' as string, { with: { type: 'file' } }),

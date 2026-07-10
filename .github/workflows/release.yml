@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.artifact }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: bun-darwin-arm64
+            artifact: marquee-macos-arm64
+          - os: macos-13
+            target: bun-darwin-x64
+            artifact: marquee-macos-x64
+          - os: ubuntu-latest
+            target: bun-linux-x64
+            artifact: marquee-linux-x64
+          - os: windows-latest
+            target: bun-windows-x64
+            artifact: marquee-windows-x64.exe
+
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Restore vendor cache
+        id: cache-vendor
+        uses: actions/cache@v4
+        with:
+          path: vendor/
+          key: vendor-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/download-bins.ts', 'scripts/build-atvremote.ts') }}
+
+      - name: Download binaries into vendor/
+        if: steps.cache-vendor.outputs.cache-hit != 'true'
+        run: bun run download-bins
+
+      - name: Build atvremote into vendor/
+        if: steps.cache-vendor.outputs.cache-hit != 'true'
+        run: |
+          pip install pyatv pyinstaller
+          bun run scripts/build-atvremote.ts
+
+      - name: Type check
+        run: bun run typecheck
+
+      - name: Build binary
+        run: |
+          mkdir -p dist
+          bun build --compile --target ${{ matrix.target }} --outfile dist/${{ matrix.artifact }} src/index.ts
+
+      - name: Smoke test (non-Windows)
+        if: runner.os != 'Windows'
+        run: ./dist/${{ matrix.artifact }}
+
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        run: .\dist\${{ matrix.artifact }}
+        shell: pwsh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - name: Get version
+        id: pkg
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v3.0.1
+        with:
+          tag_name: v${{ steps.pkg.outputs.version }}
+          name: marquee v${{ steps.pkg.outputs.version }}
+          generate_release_notes: true
+          files: dist/*
+          fail_on_unmatched_files: true

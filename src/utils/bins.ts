@@ -1,0 +1,60 @@
+import { mkdir, chmod } from 'fs/promises'
+import { homedir } from 'os'
+import { join } from 'path'
+
+export interface Bins {
+  ffmpeg: string
+  ffprobe: string
+  ytDlp: string
+  atvremote: string
+}
+
+const BIN_CACHE = join(homedir(), '.cache', 'marquee', 'bin')
+const IS_WIN = process.platform === 'win32'
+
+let resolved: Bins | null = null
+
+async function ensureBin(embeddedPath: string, name: string): Promise<string> {
+  const fileName = IS_WIN ? `${name}.exe` : name
+  const dest = join(BIN_CACHE, fileName)
+  if (await Bun.file(dest).exists()) return dest
+  await mkdir(BIN_CACHE, { recursive: true })
+  await Bun.write(dest, Bun.file(embeddedPath))
+  if (!IS_WIN) await chmod(dest, 0o755)
+  return dest
+}
+
+async function resolveStandalone(): Promise<Bins> {
+  const [ff, fp, yt, atv] = await Promise.all([
+    import('../../vendor/ffmpeg' as string, { with: { type: 'file' } }),
+    import('../../vendor/ffprobe' as string, { with: { type: 'file' } }),
+    import('../../vendor/yt-dlp' as string, { with: { type: 'file' } }),
+    import('../../vendor/atvremote' as string, { with: { type: 'file' } })
+  ])
+  return {
+    ffmpeg: await ensureBin(ff.default, 'ffmpeg'),
+    ffprobe: await ensureBin(fp.default, 'ffprobe'),
+    ytDlp: await ensureBin(yt.default, 'yt-dlp'),
+    atvremote: await ensureBin(atv.default, 'atvremote')
+  }
+}
+
+function resolveVendor(): Bins {
+  const ext = IS_WIN ? '.exe' : ''
+  const vendorDir = join(import.meta.dirname, '..', '..', 'vendor')
+  return {
+    ffmpeg: join(vendorDir, `ffmpeg${ext}`),
+    ffprobe: join(vendorDir, `ffprobe${ext}`),
+    ytDlp: join(vendorDir, `yt-dlp${ext}`),
+    atvremote: join(vendorDir, `atvremote${ext}`)
+  }
+}
+
+export async function resolveBinaries(): Promise<Bins> {
+  if (resolved) return resolved
+
+  const isStandalone =
+    (Bun as unknown as Record<string, unknown>)['isStandaloneExecutable'] === true
+  resolved = isStandalone ? await resolveStandalone() : resolveVendor()
+  return resolved
+}

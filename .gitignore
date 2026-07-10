@@ -1,4 +1,8 @@
-# Logs
+# marquee
+vendor/
+ads/
+output/
+dist/
 logs
 *.log
 npm-debug.log*

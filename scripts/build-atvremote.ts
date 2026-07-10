@@ -53,7 +53,7 @@ async function main() {
   if (build.exitCode !== 0) throw new Error('PyInstaller build failed')
 
   const built = join(workDir, 'dist', IS_WIN ? 'atvremote.exe' : 'atvremote')
-  const dest = join(VENDOR, IS_WIN ? 'atvremote.exe' : 'atvremote')
+  const dest = join(VENDOR, 'atvremote')
   await copyFile(built, dest)
   if (!IS_WIN) await chmod(dest, 0o755)
 

@@ -12,7 +12,7 @@ async function main() {
   const ffmpegStatic = (await import('ffmpeg-static')).default
   if (!ffmpegStatic) throw new Error('ffmpeg-static returned null path')
 
-  const ffmpegDest = join(VENDOR, IS_WIN ? 'ffmpeg.exe' : 'ffmpeg')
+  const ffmpegDest = join(VENDOR, 'ffmpeg')
   console.log(`Copying ffmpeg: ${ffmpegStatic} → ${ffmpegDest}`)
 
   await copyFile(ffmpegStatic, ffmpegDest)
@@ -22,7 +22,7 @@ async function main() {
   // --- ffprobe ---
   const ffprobeInstaller = await import('@ffprobe-installer/ffprobe')
   const ffprobeSrc = ffprobeInstaller.path
-  const ffprobeDest = join(VENDOR, IS_WIN ? 'ffprobe.exe' : 'ffprobe')
+  const ffprobeDest = join(VENDOR, 'ffprobe')
   console.log(`Copying ffprobe: ${ffprobeSrc} → ${ffprobeDest}`)
 
   await copyFile(ffprobeSrc, ffprobeDest)
@@ -30,7 +30,7 @@ async function main() {
   if (!IS_WIN) await chmod(ffprobeDest, 0o755)
 
   // --- yt-dlp ---
-  const ytDlpDest = join(VENDOR, IS_WIN ? 'yt-dlp.exe' : 'yt-dlp')
+  const ytDlpDest = join(VENDOR, 'yt-dlp')
   console.log(`Downloading yt-dlp → ${ytDlpDest}`)
 
   const YTDlpWrap = (await import('yt-dlp-wrap')).default
@@ -41,9 +41,7 @@ async function main() {
   console.log('\n✅ vendor/ populated successfully')
   console.log('   Contents:')
 
-  for (const f of ['ffmpeg', 'ffprobe', 'yt-dlp'].map(n =>
-    join(VENDOR, IS_WIN ? `${n}.exe` : n)
-  )) {
+  for (const f of ['ffmpeg', 'ffprobe', 'yt-dlp'].map(n => join(VENDOR, n))) {
     const size = Bun.file(f).size
     console.log(
       `   ${f.replace(VENDOR + '/', '')} (${(size / 1024 / 1024).toFixed(1)} MB)`

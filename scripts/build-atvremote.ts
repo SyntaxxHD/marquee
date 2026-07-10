@@ -16,11 +16,10 @@ const IS_WIN = process.platform === 'win32'
 async function main() {
   await mkdir(VENDOR, { recursive: true })
 
-  // Resolve pyatv's CLI entry point
   const entryProc = Bun.spawnSync([
     'python',
     '-c',
-    "import pyatv, os; print(os.path.join(os.path.dirname(pyatv.__file__), '__main__.py'))"
+    'import pyatv.scripts.atvremote as m; print(m.__file__)'
   ])
   if (entryProc.exitCode !== 0) {
     throw new Error(
@@ -39,6 +38,8 @@ async function main() {
       '--onefile',
       '--name',
       'atvremote',
+      '--collect-all',
+      'pyatv',
       '--distpath',
       join(workDir, 'dist'),
       '--workpath',

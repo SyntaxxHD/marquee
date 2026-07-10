@@ -6,7 +6,7 @@ Your own cinema pre-show. `marquee` builds a reel of ads and fresh movie trailer
 
 1. 💡 Turns your lights to a warm, bright glow
 2. 📦 Picks a few random ads from your local folder
-3. 🎥 Downloads fresh German movie trailers (via [TMDB](https://www.themoviedb.org/))
+3. 🎥 Downloads movie trailers (via [TMDB](https://www.themoviedb.org/))
 4. ✂️ Splices everything into one seamless video
 5. ▶️ Streams it to your Apple TV, dims the lights, and when it ends, turns them off so your movie can start
 
@@ -40,7 +40,7 @@ Get a free API key at [themoviedb.org/settings/api](https://www.themoviedb.org/s
 marquee run
 ```
 
-The first run walks you through setup — it finds your Apple TV, pairs with it (enter the PIN shown on your TV), and optionally connects your Hue bridge and lights.
+The first run walks you through setup — it finds your Apple TV and pairs with it (enter the PIN shown on your TV), lets you pick your trailer language and output quality, and optionally connects your Hue bridge and lights.
 
 ## 🕹️ Commands
 

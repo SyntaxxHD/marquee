@@ -31,10 +31,16 @@ async function main() {
 
   // --- yt-dlp ---
   const ytDlpDest = join(VENDOR, 'yt-dlp')
-  console.log(`Downloading yt-dlp → ${ytDlpDest}`)
+  const ytDlpUrl = `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${ytDlpAsset()}`
+  console.log(`Downloading yt-dlp: ${ytDlpUrl} → ${ytDlpDest}`)
 
-  const YTDlpWrap = (await import('yt-dlp-wrap')).default
-  await YTDlpWrap.downloadFromGithub(ytDlpDest, undefined, process.platform)
+  const res = await fetch(ytDlpUrl)
+  if (!res.ok) {
+    throw new Error(
+      `Failed to download yt-dlp (${res.status} ${res.statusText}): ${ytDlpUrl}`
+    )
+  }
+  await Bun.write(ytDlpDest, res)
 
   if (!IS_WIN) await chmod(ytDlpDest, 0o755)
 
@@ -46,6 +52,19 @@ async function main() {
     console.log(
       `   ${f.replace(VENDOR + '/', '')} (${(size / 1024 / 1024).toFixed(1)} MB)`
     )
+  }
+}
+
+function ytDlpAsset(): string {
+  switch (process.platform) {
+    case 'linux':
+      return 'yt-dlp_linux'
+    case 'darwin':
+      return 'yt-dlp_macos'
+    case 'win32':
+      return 'yt-dlp.exe'
+    default:
+      throw new Error(`Unsupported platform for yt-dlp: ${process.platform}`)
   }
 }
 

@@ -6,18 +6,47 @@ import ffmpeg from 'fluent-ffmpeg'
 import type { OutputResolution, OutputFps } from '../config.ts'
 import { resolveBinaries } from '../utils/bins.ts'
 import { MarqueeError } from '../utils/errors.ts'
+import { exec } from '../utils/exec.ts'
 import { logger } from '../utils/logger.ts'
+import { createProgressBar } from '../utils/progress.ts'
 
 export interface AssembleInput {
   files: string[]
-  outputDir: string
   tmpDir: string
+  outputDir: string
   resolution: OutputResolution
   fps: OutputFps
 }
 
 export interface AssembleResult {
   outputPath: string
+}
+
+const HW_ENCODERS = ['h264_videotoolbox', 'h264_nvenc', 'h264_qsv', 'h264_amf']
+
+interface VideoEncoder {
+  codec: string
+  hardware: boolean
+}
+
+let cachedEncoder: VideoEncoder | null = null
+
+async function pickVideoEncoder(ffmpegPath: string): Promise<VideoEncoder> {
+  if (cachedEncoder) return cachedEncoder
+
+  const result = await exec([ffmpegPath, '-hide_banner', '-encoders'], {
+    captureOutput: true,
+    silent: true
+  })
+  const available = result.stdout
+
+  const hw = HW_ENCODERS.find(name => available.includes(name))
+  cachedEncoder = hw
+    ? { codec: hw, hardware: true }
+    : { codec: 'libx264', hardware: false }
+
+  logger.debug(`Using video encoder: ${cachedEncoder.codec}`)
+  return cachedEncoder
 }
 
 function parseResolution(res: OutputResolution): { width: number; height: number } {
@@ -30,30 +59,47 @@ function normalizeSegment(
   output: string,
   width: number,
   height: number,
-  fps: OutputFps
+  fps: OutputFps,
+  encoder: VideoEncoder,
+  step: string,
+  label: string
 ): Promise<void> {
   const is4K = width >= 3840
+  const bar = createProgressBar({ step, label })
   return new Promise((resolve, reject) => {
-    ffmpeg(input)
+    const command = ffmpeg(input)
       .videoFilters([
         `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
         `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
         'setsar=1'
       ])
       .fps(fps)
-      .videoCodec('libx264')
-      .addOutputOption(`-preset ${is4K ? 'slow' : 'fast'}`)
-      .addOutputOption('-crf 18')
+      .videoCodec(encoder.codec)
+
+    if (encoder.hardware) {
+      command.addOutputOption(`-b:v ${is4K ? '20M' : '8M'}`)
+    } else {
+      command
+        .addOutputOption(`-preset ${is4K ? 'slow' : 'fast'}`)
+        .addOutputOption('-crf 18')
+    }
+
+    command
       .audioCodec('aac')
       .audioBitrate('192k')
       .audioFrequency(48000)
       .audioChannels(2)
       .addOutputOption('-movflags +faststart')
       .output(output)
-      .on('end', () => resolve())
-      .on('error', (err: Error) =>
+      .on('progress', p => bar.update(p.percent ?? 0))
+      .on('end', () => {
+        bar.finish()
+        resolve()
+      })
+      .on('error', (err: Error) => {
+        bar.finish()
         reject(new MarqueeError(`ffmpeg normalize failed: ${err.message}`))
-      )
+      })
       .run()
   })
 }
@@ -66,16 +112,27 @@ export async function assemblePreshow(input: AssembleInput): Promise<AssembleRes
   ffmpeg.setFfmpegPath(bins.ffmpeg)
   ffmpeg.setFfprobePath(bins.ffprobe)
 
+  const encoder = await pickVideoEncoder(bins.ffmpeg)
   const { width, height } = parseResolution(input.resolution)
   const normalized: string[] = []
   const total = input.files.length
 
-  logger.info(`🔧 Normalizing ${total} segment(s)...`)
+  const accel = encoder.hardware ? ' (hardware accelerated)' : ''
+  logger.info(`🔧 Normalizing ${total} segment(s)${accel}...`)
   for (let i = 0; i < total; i++) {
     const file = input.files[i]
     const outPath = join(input.tmpDir, `normalized-${i}.mp4`)
-    logger.step(i + 1, total, file.split('/').pop() ?? file)
-    await normalizeSegment(file, outPath, width, height, input.fps)
+    const label = file.split('/').pop() ?? file
+    await normalizeSegment(
+      file,
+      outPath,
+      width,
+      height,
+      input.fps,
+      encoder,
+      `[${i + 1}/${total}]`,
+      label
+    )
     normalized.push(outPath)
   }
 
@@ -83,20 +140,25 @@ export async function assemblePreshow(input: AssembleInput): Promise<AssembleRes
   const concatFile = join(input.tmpDir, 'concat.txt')
   await writeFile(concatFile, concatList)
 
-  const timestamp = Date.now()
-  const outputPath = join(input.outputDir, `marquee-${timestamp}.mp4`)
+  const outputPath = join(input.outputDir, `marquee-${Date.now()}.mp4`)
 
   logger.info('✂️  Concatenating segments...')
+  const concatBar = createProgressBar({ step: '[concat]', label: 'Joining' })
   await new Promise<void>((resolve, reject) => {
     ffmpeg()
       .input(concatFile)
       .inputOptions(['-f concat', '-safe 0'])
       .outputOptions(['-c copy', '-movflags +faststart'])
       .output(outputPath)
-      .on('end', () => resolve())
-      .on('error', (err: Error) =>
+      .on('progress', p => concatBar.update(p.percent ?? 0))
+      .on('end', () => {
+        concatBar.finish()
+        resolve()
+      })
+      .on('error', (err: Error) => {
+        concatBar.finish()
         reject(new MarqueeError(`ffmpeg concat failed: ${err.message}`))
-      )
+      })
       .run()
   })
 

@@ -75,7 +75,7 @@ jobs:
       - name: 📺 Build atvremote into vendor/
         if: steps.cache-vendor.outputs.cache-hit != 'true'
         run: |
-          pip install pyatv pyinstaller
+          pip install pyinstaller
           bun run scripts/build-atvremote.ts
 
       - name: 🔨 Build binary

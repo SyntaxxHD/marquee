@@ -1,11 +1,9 @@
 import { join } from 'path'
 
-import YTDlpWrap from 'yt-dlp-wrap'
-
-import { resolveBinaries } from '../utils/bins.ts'
 import { TrailerCache } from '../utils/cache.ts'
 import { MarqueeError } from '../utils/errors.ts'
 import { logger } from '../utils/logger.ts'
+import { downloadVideo } from '../utils/ytdlp.ts'
 
 import { TmdbClient } from './tmdb.ts'
 
@@ -42,14 +40,13 @@ export class TrailerService {
         continue
       }
 
+      const step = `[${results.length + 1}/${count}]`
       try {
-        const result = await this.getOrDownload(youtubeId, movie.title)
+        const result = await this.getOrDownload(youtubeId, movie.title, step)
         results.push(result)
-        logger.step(
-          results.length,
-          count,
-          `${movie.title}${result.fromCache ? ' (cached)' : ''}`
-        )
+        if (result.fromCache) {
+          logger.step(results.length, count, `${movie.title} (cached)`)
+        }
       } catch (err) {
         logger.warn(`Skipping "${movie.title}": ${(err as Error).message}`)
       }
@@ -64,28 +61,21 @@ export class TrailerService {
     return results
   }
 
-  private async getOrDownload(youtubeId: string, title: string): Promise<TrailerResult> {
+  private async getOrDownload(
+    youtubeId: string,
+    title: string,
+    step: string
+  ): Promise<TrailerResult> {
     const cached = await this.cache.get(youtubeId)
     if (cached) {
       return { youtubeId, filePath: cached, title, fromCache: true }
     }
 
     const outputPath = join(this.cache['cacheDir'], `${youtubeId}.mp4`)
-    logger.debug(`Downloading trailer: ${title} (${youtubeId})`)
-
-    const bins = await resolveBinaries()
-    const ytdlp = new YTDlpWrap(bins.ytDlp)
-
-    await ytdlp.execPromise([
-      `https://www.youtube.com/watch?v=${youtubeId}`,
-      '-f',
-      'bestvideo[ext=mp4][height<=2160]+bestaudio[ext=m4a]/bestvideo[height<=2160]+bestaudio/best[ext=mp4]/best',
-      '--merge-output-format',
-      'mp4',
-      '--no-playlist',
-      '-o',
-      outputPath
-    ])
+    await downloadVideo(youtubeId, outputPath, {
+      step,
+      label: title
+    })
 
     if (!(await Bun.file(outputPath).exists())) {
       throw new Error('Download completed but output file not found')

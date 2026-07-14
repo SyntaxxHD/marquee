@@ -1,11 +1,3 @@
-/**
- * Builds the atvremote (pyatv) CLI as a standalone binary via PyInstaller and drops it
- * into vendor/. pyatv ships no official standalone binary, so we build it ourselves.
- * Shared recipe for local dev and CI (release.yml runs the same steps).
- *
- * Requires: python 3, pip install pyatv pyinstaller
- * Run: bun run scripts/build-atvremote.ts
- */
 import { copyFile, chmod, mkdir, rm } from 'fs/promises'
 import { join } from 'path'
 
@@ -13,8 +5,18 @@ const ROOT = join(import.meta.dirname, '..')
 const VENDOR = join(ROOT, 'vendor')
 const IS_WIN = process.platform === 'win32'
 
+const PYATV_SOURCE =
+  'git+https://github.com/jlacivita/pyatv.git@8848ad3fd9ae46b8eb733bfc667b536a28f04c5a'
+
 async function main() {
   await mkdir(VENDOR, { recursive: true })
+
+  console.log(`Installing pyatv from ${PYATV_SOURCE}...`)
+  const install = Bun.spawnSync(['pip', 'install', PYATV_SOURCE], {
+    stdout: 'inherit',
+    stderr: 'inherit'
+  })
+  if (install.exitCode !== 0) throw new Error('pip install of pyatv failed')
 
   const entryProc = Bun.spawnSync([
     'python',
@@ -23,8 +25,7 @@ async function main() {
   ])
   if (entryProc.exitCode !== 0) {
     throw new Error(
-      'Could not resolve pyatv. Install it first: pip install pyatv pyinstaller\n' +
-        entryProc.stderr.toString()
+      'Could not resolve pyatv after install.\n' + entryProc.stderr.toString()
     )
   }
   const entry = entryProc.stdout.toString().trim()

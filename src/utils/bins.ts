@@ -1,6 +1,7 @@
 import { mkdir, chmod } from 'fs/promises'
-import { homedir } from 'os'
 import { join } from 'path'
+
+import { BIN_CACHE_DIR } from '../config.ts'
 
 export interface Bins {
   ffmpeg: string
@@ -9,7 +10,7 @@ export interface Bins {
   atvremote: string
 }
 
-const BIN_CACHE = join(homedir(), '.cache', 'marquee', 'bin')
+const BIN_CACHE = BIN_CACHE_DIR
 const IS_WIN = process.platform === 'win32'
 
 let resolved: Bins | null = null

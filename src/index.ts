@@ -1,8 +1,5 @@
-import { rm } from 'fs/promises'
-
 import chalk from 'chalk'
 
-import { runBuild } from './commands/build.ts'
 import { runCheck } from './commands/check.ts'
 import { runRun } from './commands/run.ts'
 import { runSetup } from './commands/setup.ts'
@@ -10,36 +7,14 @@ import { runStream } from './commands/stream.ts'
 import { loadUserConfig } from './config.ts'
 import { MarqueeError } from './utils/errors.ts'
 import { logger } from './utils/logger.ts'
-
-let activeTmpDir: string | null = null
-
-export function setActiveTmpDir(dir: string): void {
-  activeTmpDir = dir
-}
-
-async function cleanup(): Promise<void> {
-  if (activeTmpDir) {
-    try {
-      await rm(activeTmpDir, { recursive: true, force: true })
-    } catch (err) {
-      logger.debug(`Cleanup failed for ${activeTmpDir}: ${(err as Error).message}`)
-    }
-  }
-}
+import { cleanupTmpDir } from './utils/tmp.ts'
 
 function printHelp(): void {
   console.log(chalk.bold.cyan('\n🎬 marquee - cinema pre-show assembler\n'))
   console.log(
     '  ' + chalk.bold('marquee setup') + '         Interactive first-time configuration'
   )
-  console.log(
-    '  ' +
-      chalk.bold('marquee run') +
-      '           Fetch trailers, build, and play the pre-show'
-  )
-  console.log(
-    '  ' + chalk.bold('marquee build') + '         Build the pre-show without playing it'
-  )
+  console.log('  ' + chalk.bold('marquee run') + '           Build and play the pre-show')
   console.log(
     '  ' + chalk.bold('marquee stream <file>') + ' Play an already-built pre-show file'
   )
@@ -75,9 +50,6 @@ async function main(): Promise<void> {
     case 'run':
       await runRun()
       break
-    case 'build':
-      await runBuild()
-      break
     case 'stream':
       await runStream(rest[0])
       break
@@ -94,17 +66,17 @@ async function main(): Promise<void> {
 process.on('SIGINT', async () => {
   console.log()
   logger.warn('Interrupted. Cleaning up...')
-  await cleanup()
+  await cleanupTmpDir()
   process.exit(130)
 })
 
 process.on('SIGTERM', async () => {
-  await cleanup()
+  await cleanupTmpDir()
   process.exit(143)
 })
 
 main().catch(async err => {
-  await cleanup()
+  await cleanupTmpDir()
   if (err instanceof MarqueeError) {
     logger.error(err.message)
   } else {

@@ -34,13 +34,15 @@ async function main() {
   const ytDlpUrl = `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${ytDlpAsset()}`
   console.log(`Downloading yt-dlp: ${ytDlpUrl} → ${ytDlpDest}`)
 
-  const res = await fetch(ytDlpUrl)
+  const res = await fetch(ytDlpUrl, { redirect: 'follow' })
   if (!res.ok) {
     throw new Error(
       `Failed to download yt-dlp (${res.status} ${res.statusText}): ${ytDlpUrl}`
     )
   }
-  await Bun.write(ytDlpDest, res)
+
+  const bytes = new Uint8Array(await res.arrayBuffer())
+  await Bun.write(ytDlpDest, bytes)
 
   if (!IS_WIN) await chmod(ytDlpDest, 0o755)
 

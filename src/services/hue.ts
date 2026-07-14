@@ -1,7 +1,11 @@
-import { api as hueApi, discovery, model } from 'node-hue-api'
+process.env.NODE_HUE_API_USE_INSECURE_CONNECTION = '1'
+
+import type { model as HueModel } from 'node-hue-api'
 
 import { MarqueeError } from '../utils/errors.ts'
 import { logger } from '../utils/logger.ts'
+
+const { api: hueApi, discovery, model, ApiError } = await import('node-hue-api')
 
 export interface DiscoveredBridge {
   ipaddress: string
@@ -21,17 +25,48 @@ export async function discoverBridges(): Promise<DiscoveredBridge[]> {
   }
 }
 
-export async function createHueUser(bridgeIp: string): Promise<string> {
+const LINK_BUTTON_NOT_PRESSED = 101
+
+export interface CreateUserOptions {
+  timeoutMs?: number
+  intervalMs?: number
+  onWaiting?: () => void
+}
+
+export async function createHueUser(
+  bridgeIp: string,
+  opts: CreateUserOptions = {}
+): Promise<string> {
+  const timeoutMs = opts.timeoutMs ?? 60_000
+  const intervalMs = opts.intervalMs ?? 2_000
+  const deadline = Date.now() + timeoutMs
+
   const unauthenticated = await hueApi
     .createInsecureLocal(bridgeIp)
     .connect('', undefined, 5000)
-  try {
-    const createdUser = await unauthenticated.users.createUser('marquee', 'mac')
-    return createdUser.username
-  } catch (err) {
-    throw new MarqueeError(
-      `Failed to create Hue user. Did you press the bridge button?\n${(err as Error).message}`
-    )
+
+  for (;;) {
+    opts.onWaiting?.()
+    try {
+      const createdUser = await unauthenticated.users.createUser('marquee', 'mac')
+      return createdUser.username
+    } catch (err) {
+      const hueType = err instanceof ApiError ? err.getHueErrorType() : undefined
+
+      if (hueType !== LINK_BUTTON_NOT_PRESSED) {
+        throw new MarqueeError(
+          `Failed to register with Hue bridge: ${(err as Error).message}`
+        )
+      }
+
+      if (Date.now() + intervalMs >= deadline) {
+        throw new MarqueeError(
+          'Timed out waiting for the Hue bridge button to be pressed.'
+        )
+      }
+
+      await Bun.sleep(intervalMs)
+    }
   }
 }
 
@@ -42,8 +77,8 @@ export async function listHueLights(
   const authenticated = await hueApi.createInsecureLocal(bridgeIp).connect(username)
   const lights = await authenticated.lights.getAll()
   return lights.map(l => ({
-    id: String((l as model.Light).id),
-    name: (l as model.Light).name ?? `Light ${(l as model.Light).id}`
+    id: String((l as HueModel.Light).id),
+    name: (l as HueModel.Light).name ?? `Light ${(l as HueModel.Light).id}`
   }))
 }
 
@@ -66,18 +101,21 @@ export class HueClient {
   ) {}
 
   async setLightsNormal(lightIds: string[]): Promise<void> {
-    await this.applyState(lightIds, new model.LightState().on().brightness(100).ct(366))
+    await this.applyState(lightIds, new model.LightState().on().brightness(100))
   }
 
-  async dimLights(lightIds: string[]): Promise<void> {
-    await this.applyState(lightIds, new model.LightState().on().brightness(30).ct(400))
+  async dimLights(lightIds: string[], percent: number): Promise<void> {
+    await this.applyState(lightIds, new model.LightState().on().brightness(percent))
   }
 
   async turnLightsOff(lightIds: string[]): Promise<void> {
     await this.applyState(lightIds, new model.LightState().off())
   }
 
-  private async applyState(lightIds: string[], state: model.LightState): Promise<void> {
+  private async applyState(
+    lightIds: string[],
+    state: HueModel.LightState
+  ): Promise<void> {
     try {
       const bridge = await hueApi
         .createInsecureLocal(this.bridgeIp)

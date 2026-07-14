@@ -1,7 +1,10 @@
+import { mkdir } from 'fs/promises'
 import { networkInterfaces } from 'os'
+import { dirname } from 'path'
 
 import multicastDns from 'multicast-dns'
 
+import { PYATV_STORAGE_FILE } from '../config.ts'
 import { resolveBinaries } from '../utils/bins.ts'
 import { MarqueeError } from '../utils/errors.ts'
 import { execOrThrow, exec } from '../utils/exec.ts'
@@ -12,10 +15,17 @@ export interface DiscoveredAppleTV {
   ip: string
 }
 
+export interface AppleTVTarget {
+  name: string
+  id: string
+  address: string
+}
+
 export async function discoverAppleTVs(timeoutMs = 5000): Promise<DiscoveredAppleTV[]> {
   return new Promise(resolve => {
     const mdns = multicastDns()
-    const found = new Map<string, DiscoveredAppleTV>()
+
+    const services = new Map<string, string>()
     const addresses = new Map<string, string>()
 
     mdns.query({ questions: [{ name: '_airplay._tcp.local', type: 'PTR' }] })
@@ -25,21 +35,25 @@ export async function discoverAppleTVs(timeoutMs = 5000): Promise<DiscoveredAppl
         if (answer.type === 'A') {
           addresses.set(answer.name, answer.data)
         }
-        if (answer.type === 'SRV') {
-          const ip = addresses.get(answer.data?.target)
-          if (ip) {
-            const name = answer.name.replace(/\._airplay\._tcp\.local$/, '')
-            found.set(ip, { name, ip })
-          }
-        }
-        if (answer.type === 'PTR' && answer.name === '_airplay._tcp.local') {
-          // PTR points to a service instance — SRV/A records may arrive later
+        if (answer.type === 'SRV' && answer.name.endsWith('._airplay._tcp.local')) {
+          const target = (answer.data as { target?: string })?.target
+          if (target) services.set(answer.name, target)
         }
       }
     })
 
     setTimeout(() => {
       mdns.destroy()
+
+      const found = new Map<string, DiscoveredAppleTV>()
+      for (const [service, target] of services) {
+        const ip = addresses.get(target)
+        if (!ip) continue
+
+        const name = service.replace(/\._airplay\._tcp\.local$/, '')
+        found.set(ip, { name, ip })
+      }
+
       resolve(Array.from(found.values()))
     }, timeoutMs)
   })
@@ -69,19 +83,93 @@ function getLocalIp(targetIp: string): string {
   throw new MarqueeError('Could not determine local IP address.')
 }
 
-export async function pairAppleTV(deviceId: string): Promise<void> {
+async function resolveIdentifier(address: string): Promise<string> {
   const bins = await resolveBinaries()
-  await execOrThrow([bins.atvremote, '--id', deviceId, '--protocol', 'airplay', 'pair'], {
-    errorMessage: `AirPlay pairing failed for device ${deviceId}`
+  const result = await exec([bins.atvremote, '--scan-hosts', address, 'scan'], {
+    captureOutput: true,
+    silent: true
   })
+
+  const lines = result.stdout.split('\n')
+  const idLines: string[] = []
+  let inIds = false
+  for (const line of lines) {
+    if (line.trim().startsWith('Identifiers:')) {
+      inIds = true
+      continue
+    }
+    if (inIds) {
+      const m = line.match(/^\s*-\s*(.+?)\s*$/)
+      if (m) idLines.push(m[1])
+      else break
+    }
+  }
+
+  const uuid = idLines.find(id => /^[0-9A-Fa-f-]{36}$/.test(id))
+  const identifier = uuid ?? idLines[0]
+  if (!identifier) {
+    throw new MarqueeError(
+      `Could not resolve an identifier for Apple TV at ${address}. Is it powered on?`
+    )
+  }
+  return identifier
 }
 
-export async function playFile(
-  filePath: string,
-  appleTV: { name: string; id: string }
-): Promise<void> {
+function atvremoteArgs(atvremote: string, target: AppleTVTarget): string[] {
+  return [
+    atvremote,
+    '--storage-filename',
+    PYATV_STORAGE_FILE,
+    '--id',
+    target.id,
+    '--address',
+    target.address
+  ]
+}
+
+// Probes whether stored pairing credentials still work. `app` is served over
+// Companion, which requires valid pairing, so exit 0 means we are still paired.
+export async function probeAppleTV(target: AppleTVTarget): Promise<boolean> {
   const bins = await resolveBinaries()
-  const localIp = getLocalIp(appleTV.id)
+  const args = [...atvremoteArgs(bins.atvremote, target), 'app']
+  const result = await exec(args, { captureOutput: true, silent: true })
+  return result.exitCode === 0
+}
+
+export async function pairAppleTV(target: AppleTVTarget): Promise<void> {
+  const bins = await resolveBinaries()
+
+  await mkdir(dirname(PYATV_STORAGE_FILE), { recursive: true })
+
+  for (const protocol of ['companion', 'airplay']) {
+    const label = protocol === 'companion' ? 'control' : 'AirPlay'
+    logger.info(`Enter the ${label} PIN shown on your TV:`)
+
+    const args = [
+      ...atvremoteArgs(bins.atvremote, target),
+      '--protocol',
+      protocol,
+      'pair'
+    ]
+    await execOrThrow(args, {
+      inheritStdin: true,
+      discardOutput: true,
+      errorMessage: `${protocol} pairing failed for ${target.name} (${target.address})`
+    })
+  }
+}
+
+export async function resolveTarget(
+  name: string,
+  address: string
+): Promise<AppleTVTarget> {
+  const id = await resolveIdentifier(address)
+  return { name, id, address }
+}
+
+export async function playFile(filePath: string, appleTV: AppleTVTarget): Promise<void> {
+  const bins = await resolveBinaries()
+  const localIp = getLocalIp(appleTV.address)
 
   const port = 47820 + Math.floor(Math.random() * 100)
   const fileUrl = `http://${localIp}:${port}/video.mp4`
@@ -98,27 +186,38 @@ export async function playFile(
   logger.debug(`Serving video at ${fileUrl}`)
 
   try {
-    logger.info(`▶️  Sending to ${appleTV.name} (${appleTV.id})`)
+    logger.info(`▶️  Sending to ${appleTV.name} (${appleTV.address})`)
 
-    await execOrThrow([bins.atvremote, '--id', appleTV.id, `play_url=${fileUrl}`], {
-      errorMessage: `AirPlay stream failed. Ensure the device is reachable and pairing is valid.`
-    })
+    const args = [...atvremoteArgs(bins.atvremote, appleTV), `play_url=${fileUrl}`]
+    const result = await exec(args, { captureOutput: true, silent: true })
 
-    await waitForPlaybackEnd(bins.atvremote, appleTV.id)
+    if (result.exitCode !== 0) {
+      const isTvOs26PollingBug =
+        result.stderr.includes('playback-info') && result.stderr.includes('500')
+      if (!isTvOs26PollingBug) {
+        throw new MarqueeError(
+          'AirPlay stream failed. Ensure the device is reachable and pairing is valid.'
+        )
+      }
+      logger.debug('Ignoring tvOS play_url playback-info 500 (playback started)')
+    }
+
+    await waitForPlaybackEnd(bins.atvremote, appleTV)
   } finally {
     server.stop(true)
   }
 }
 
-async function waitForPlaybackEnd(atvremote: string, deviceId: string): Promise<void> {
+async function waitForPlaybackEnd(
+  atvremote: string,
+  target: AppleTVTarget
+): Promise<void> {
   logger.debug('Polling playback state...')
   const maxPolls = 720 // 1 hour max
   for (let i = 0; i < maxPolls; i++) {
     await Bun.sleep(5000)
-    const result = await exec([atvremote, '--id', deviceId, 'playing'], {
-      captureOutput: true,
-      silent: true
-    })
+    const args = [...atvremoteArgs(atvremote, target), 'playing']
+    const result = await exec(args, { captureOutput: true, silent: true })
     if (result.exitCode !== 0) break
     const state = result.stdout.toLowerCase()
 

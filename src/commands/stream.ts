@@ -15,10 +15,11 @@ export async function runStream(filePath?: string): Promise<void> {
 
   const hue = config.hue ? new HueClient(config.hue.bridgeIp, config.hue.username) : null
   const lightIds = config.hue?.controlledLightIds ?? []
+  const dimPercent = config.hue?.dimPercent ?? 30
 
   if (hue) {
-    logger.info('💡 Lights → dim')
-    await hue.dimLights(lightIds)
+    logger.info(`💡 Lights → dim (${dimPercent}%)`)
+    await hue.dimLights(lightIds, dimPercent)
   }
 
   try {

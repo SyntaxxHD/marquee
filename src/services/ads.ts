@@ -10,12 +10,16 @@ export interface AdResult {
   fileName: string
 }
 
-export async function pickAds(adsDir: string, count: number): Promise<AdResult[]> {
+export async function pickLocalVideos(
+  dir: string,
+  count: number,
+  kind = 'videos'
+): Promise<AdResult[]> {
   let entries: string[]
   try {
-    entries = await readdir(adsDir)
+    entries = await readdir(dir)
   } catch {
-    throw new MarqueeError(`Ads directory not found: ${adsDir}`)
+    throw new MarqueeError(`Directory not found: ${dir}`)
   }
 
   const videos = entries.filter(f => {
@@ -24,14 +28,18 @@ export async function pickAds(adsDir: string, count: number): Promise<AdResult[]
   })
 
   if (videos.length === 0) {
-    throw new MarqueeError(`No video files found in ads directory: ${adsDir}`)
+    throw new MarqueeError(`No ${kind} found in directory: ${dir}`)
   }
 
   const shuffled = [...videos].sort(() => Math.random() - 0.5)
   const picked: AdResult[] = []
   for (let i = 0; i < count; i++) {
     const fileName = shuffled[i % shuffled.length]
-    picked.push({ filePath: join(adsDir, fileName), fileName })
+    picked.push({ filePath: join(dir, fileName), fileName })
   }
   return picked
+}
+
+export function pickAds(adsDir: string, count: number): Promise<AdResult[]> {
+  return pickLocalVideos(adsDir, count, 'ad videos')
 }

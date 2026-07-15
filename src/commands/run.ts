@@ -2,7 +2,8 @@ import prompts from 'prompts'
 
 import { loadConfig } from '../config.ts'
 import { HueClient } from '../services/hue.ts'
-import { playFile } from '../services/player.ts'
+import { playViaAppleTV } from '../services/player.ts'
+import { MarqueeError } from '../utils/errors.ts'
 import { logger } from '../utils/logger.ts'
 import { cleanupTmpDir } from '../utils/tmp.ts'
 
@@ -41,8 +42,12 @@ export async function runRun(): Promise<void> {
   }
 
   try {
-    if (!config.appleTV) throw new Error('No Apple TV configured. Run marquee setup.')
-    await playFile(outputPath, config.appleTV)
+    if (!config.appleTV) {
+      throw new MarqueeError(
+        'No Apple TV configured. Run `marquee setup` to set up Apple TV.'
+      )
+    }
+    await playViaAppleTV(outputPath, config.appleTV)
   } finally {
     if (hue) {
       logger.info('💡 Lights → off')

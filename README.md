@@ -54,7 +54,7 @@ Built with [Bun](https://bun.sh) + TypeScript.
 bun install
 bun run download-bins # fetch ffmpeg, ffprobe, yt-dlp into vendor/
 pip install pyinstaller # build tool for atvremote (pyatv is pinned by the script)
-bun run scripts/build-atvremote.ts # build atvremote
+bun run scripts/build-atvremote.ts # build atvremote (AirPlay)
 bun run start <command> # run from source
 bun run build:binary # compile a standalone binary
 ```

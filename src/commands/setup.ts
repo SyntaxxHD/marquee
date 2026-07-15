@@ -18,8 +18,8 @@ import {
 import {
   discoverAppleTVs,
   pairAppleTV,
-  resolveTarget,
-  probeAppleTV
+  probeAppleTV,
+  resolveTarget
 } from '../services/player.ts'
 import { TmdbClient } from '../services/tmdb.ts'
 import { MarqueeError } from '../utils/errors.ts'
@@ -104,7 +104,7 @@ export async function runSetup(): Promise<void> {
 
   const tmdbApiKey = trailerSource === 'auto' ? await setupTmdb(existing?.tmdbApiKey) : ''
 
-  const appleTV = await setupAppleTV(existing?.appleTV ?? null)
+  const appleTV = await setupPlayer(existing?.appleTV ?? null)
 
   const qualityValue = existing
     ? `${existing.outputResolution}@${existing.outputFps}`
@@ -238,16 +238,35 @@ async function setupTmdb(existingKey?: string): Promise<string> {
   }
 }
 
+async function setupPlayer(
+  existingAppleTV: UserConfig['appleTV']
+): Promise<UserConfig['appleTV']> {
+  return setupAppleTV(existingAppleTV)
+}
+
 async function setupAppleTV(
   existing: UserConfig['appleTV']
 ): Promise<UserConfig['appleTV']> {
   if (existing) {
-    console.log(chalk.dim(`Checking saved Apple TV (${existing.name})...`))
-    if (await probeAppleTV(existing)) {
-      logger.success(`Apple TV still paired (${existing.name})`)
-      return existing
+    const modeRes = await prompts({
+      type: 'select',
+      name: 'mode',
+      message: `Saved Apple TV: ${existing.name}`,
+      choices: [
+        { title: `Use existing (${existing.name})`, value: 'existing' },
+        { title: 'Set up a different device', value: 'new' }
+      ]
+    })
+    if (!modeRes.mode) throw new MarqueeError('Setup cancelled.')
+
+    if (modeRes.mode === 'existing') {
+      console.log(chalk.dim(`Checking pairing for ${existing.name}...`))
+      if (await probeAppleTV(existing)) {
+        logger.success(`Apple TV still paired (${existing.name})`)
+        return existing
+      }
+      logger.warn('Pairing no longer works. Please select and re-pair a device.')
     }
-    logger.warn('Saved Apple TV pairing no longer works. Re-pairing needed.')
   }
 
   let selectedAddress: string
@@ -275,10 +294,7 @@ async function setupAppleTV(
     })
 
     if (!res.choice) throw new MarqueeError('Setup cancelled.')
-
-    if (res.choice === '__rescan__') {
-      continue
-    }
+    if (res.choice === '__rescan__') continue
 
     if (res.choice === '__manual__') {
       const manual = await prompts({
@@ -288,9 +304,7 @@ async function setupAppleTV(
         validate: v =>
           /^\d+\.\d+\.\d+\.\d+$/.test(v.trim()) || 'Enter a valid IPv4 address'
       })
-
       if (!manual.ip) throw new MarqueeError('Setup cancelled.')
-
       selectedAddress = (manual.ip as string).trim()
       selectedName = `Apple TV (${selectedAddress})`
       break

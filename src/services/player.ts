@@ -127,8 +127,6 @@ function atvremoteArgs(atvremote: string, target: AppleTVTarget): string[] {
   ]
 }
 
-// Probes whether stored pairing credentials still work. `app` is served over
-// Companion, which requires valid pairing, so exit 0 means we are still paired.
 export async function probeAppleTV(target: AppleTVTarget): Promise<boolean> {
   const bins = await resolveBinaries()
   const args = [...atvremoteArgs(bins.atvremote, target), 'app']
@@ -167,22 +165,60 @@ export async function resolveTarget(
   return { name, id, address }
 }
 
-export async function playFile(filePath: string, appleTV: AppleTVTarget): Promise<void> {
-  const bins = await resolveBinaries()
-  const localIp = getLocalIp(appleTV.address)
-
+function serveFile(
+  filePath: string,
+  targetIp: string
+): { fileUrl: string; stopServer: () => void } {
+  const localIp = getLocalIp(targetIp)
   const port = 47820 + Math.floor(Math.random() * 100)
   const fileUrl = `http://${localIp}:${port}/video.mp4`
+  const file = Bun.file(filePath)
+  const fileSize = file.size
 
   const server = Bun.serve({
     port,
     fetch(req) {
       const url = new URL(req.url)
       if (url.pathname !== '/video.mp4') return new Response('Not found', { status: 404 })
-      return new Response(Bun.file(filePath))
+
+      const rangeHeader = req.headers.get('range')
+      const baseHeaders = {
+        'Content-Type': 'video/mp4',
+        'Accept-Ranges': 'bytes',
+        'Access-Control-Allow-Origin': '*'
+      }
+
+      if (rangeHeader) {
+        const match = rangeHeader.match(/bytes=(\d*)-(\d*)/)
+        const start = match?.[1] ? parseInt(match[1]) : 0
+
+        const end = match?.[2] ? parseInt(match[2]) : fileSize - 1
+        const chunkSize = end - start + 1
+        return new Response(file.slice(start, end + 1), {
+          status: 206,
+          headers: {
+            ...baseHeaders,
+            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+            'Content-Length': String(chunkSize)
+          }
+        })
+      }
+
+      return new Response(file, {
+        headers: { ...baseHeaders, 'Content-Length': String(fileSize) }
+      })
     }
   })
 
+  return { fileUrl, stopServer: () => server.stop(true) }
+}
+
+export async function playViaAppleTV(
+  filePath: string,
+  appleTV: AppleTVTarget
+): Promise<void> {
+  const bins = await resolveBinaries()
+  const { fileUrl, stopServer } = serveFile(filePath, appleTV.address)
   logger.debug(`Serving video at ${fileUrl}`)
 
   try {
@@ -192,19 +228,14 @@ export async function playFile(filePath: string, appleTV: AppleTVTarget): Promis
     const result = await exec(args, { captureOutput: true, silent: true })
 
     if (result.exitCode !== 0) {
-      const isTvOs26PollingBug =
-        result.stderr.includes('playback-info') && result.stderr.includes('500')
-      if (!isTvOs26PollingBug) {
-        throw new MarqueeError(
-          'AirPlay stream failed. Ensure the device is reachable and pairing is valid.'
-        )
-      }
-      logger.debug('Ignoring tvOS play_url playback-info 500 (playback started)')
+      logger.debug(
+        `play_url exited ${result.exitCode}. Continuing to serve (stderr: ${result.stderr.trim()})`
+      )
     }
 
     await waitForPlaybackEnd(bins.atvremote, appleTV)
   } finally {
-    server.stop(true)
+    stopServer()
   }
 }
 
@@ -213,9 +244,10 @@ async function waitForPlaybackEnd(
   target: AppleTVTarget
 ): Promise<void> {
   logger.debug('Polling playback state...')
+  await Bun.sleep(10000)
+
   const maxPolls = 720 // 1 hour max
   for (let i = 0; i < maxPolls; i++) {
-    await Bun.sleep(5000)
     const args = [...atvremoteArgs(atvremote, target), 'playing']
     const result = await exec(args, { captureOutput: true, silent: true })
     if (result.exitCode !== 0) break
@@ -223,5 +255,6 @@ async function waitForPlaybackEnd(
 
     if (state.includes('devicestate: idle') || state.includes('devicestate: stopped'))
       break
+    await Bun.sleep(5000)
   }
 }

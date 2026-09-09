@@ -52,6 +52,29 @@ jobs:
       - name: 📦 Install npm dependencies
         run: bun install --frozen-lockfile
 
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: ♻️ Restore vendor cache
+        id: cache-vendor
+        uses: actions/cache@v4
+        with:
+          path: vendor/
+          key: vendor-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/download-bins.ts', 'scripts/build-atvremote.ts') }}
+
+      - name: ⬇️ Download binaries into vendor/
+        if: steps.cache-vendor.outputs.cache-hit != 'true'
+        run: bun run download-bins
+
+      - name: 📺 Build atvremote into vendor/
+        if: steps.cache-vendor.outputs.cache-hit != 'true'
+        run: |
+          pip install "pyinstaller>=6,<7"
+          pip install "git+https://github.com/postlund/pyatv.git@refs/pull/2899/head"
+          bun run scripts/build-atvremote.ts
+
       - name: 🛠️ Prepare Hutch devkit
         run: npx electrobun prepare
 

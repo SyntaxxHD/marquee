@@ -142,5 +142,8 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: marquee ${{ github.ref_name }}
           generate_release_notes: true
-          files: dist/**/*
+          files: |
+            dist/marquee.dmg
+            dist/marquee.tar.gz
+            dist/marquee.zip
           fail_on_unmatched_files: false

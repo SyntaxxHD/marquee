@@ -1,5 +1,4 @@
 import { MarqueeError } from './errors.ts'
-import { logger } from './logger.ts'
 
 export interface ExecOptions {
   cwd?: string
@@ -18,8 +17,6 @@ export interface ExecResult {
 }
 
 export async function exec(cmd: string[], opts: ExecOptions = {}): Promise<ExecResult> {
-  logger.debug(`exec: ${cmd.join(' ')}`)
-
   const stdio = opts.silent
     ? (['pipe', 'pipe', 'pipe'] as const)
     : opts.captureOutput

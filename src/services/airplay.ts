@@ -1,6 +1,5 @@
 import { MarqueeError } from '../utils/errors.ts'
 import { execOrThrow, exec } from '../utils/exec.ts'
-import { logger } from '../utils/logger.ts'
 
 function escapeAppleScriptPath(p: string): string {
   return p.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
@@ -70,21 +69,19 @@ export async function playInQuickTime(
   `
   await osascript(openScript)
 
-  logger.debug(`Selecting AirPlay device: ${deviceName}`)
   const airplayScript = `
     tell application "System Events"
       tell process "QuickTime Player"
         try
           click menu item "${safeDevice}" of menu "AirPlay" of menu bar 1
         on error
-          -- AirPlay device selection may require user to enable it manually
         end try
       end tell
     end tell
   `
   await exec(['osascript', '-e', airplayScript], { captureOutput: true })
 
-  logger.info(`▶️  Playing on ${deviceName}`)
+  console.log(`Playing on ${deviceName}`)
 
   const waitAndQuit = `
     tell application "QuickTime Player"

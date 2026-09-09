@@ -2,7 +2,6 @@ import { TMDB } from 'tmdb-ts'
 import type { AvailableLanguage } from 'tmdb-ts'
 
 import { MarqueeError } from '../utils/errors.ts'
-import { logger } from '../utils/logger.ts'
 
 export interface TmdbMovie {
   id: number
@@ -48,7 +47,7 @@ export class TmdbClient {
     }
   }
 
-  async getTrailerKey(movieId: number, title: string): Promise<string | null> {
+  async getTrailerKey(movieId: number): Promise<string | null> {
     const tryFetch = async (language?: AvailableLanguage): Promise<string | null> => {
       try {
         const result = await this.client.movies.videos(
@@ -66,7 +65,6 @@ export class TmdbClient {
 
     const key = await tryFetch(this.language as AvailableLanguage)
     if (key) return key
-    logger.debug(`No ${this.language} trailer for "${title}", trying fallback`)
     return tryFetch()
   }
 

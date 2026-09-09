@@ -5,8 +5,8 @@ const ROOT = join(import.meta.dirname, '..')
 const VENDOR = join(ROOT, 'vendor')
 const IS_WIN = process.platform === 'win32'
 
-const PYATV_SOURCE =
-  'git+https://github.com/jlacivita/pyatv.git@8848ad3fd9ae46b8eb733bfc667b536a28f04c5a'
+// PR #2899: adds the tvOS 26 AirPlay protocol; not yet in a pyatv release.
+const PYATV_SOURCE = 'git+https://github.com/postlund/pyatv.git@refs/pull/2899/head'
 
 async function main() {
   await mkdir(VENDOR, { recursive: true })
@@ -23,16 +23,19 @@ async function main() {
     '-c',
     'import pyatv.scripts.atvremote as m; print(m.__file__)'
   ])
+
   if (entryProc.exitCode !== 0) {
     throw new Error(
       'Could not resolve pyatv after install.\n' + entryProc.stderr.toString()
     )
   }
+
   const entry = entryProc.stdout.toString().trim()
   console.log(`pyatv entry: ${entry}`)
 
   const workDir = join(ROOT, '.pyinstaller')
   console.log('Building atvremote with PyInstaller...')
+
   const build = Bun.spawnSync(
     [
       'pyinstaller',
@@ -51,6 +54,7 @@ async function main() {
     ],
     { stdout: 'inherit', stderr: 'inherit' }
   )
+
   if (build.exitCode !== 0) throw new Error('PyInstaller build failed')
 
   const built = join(workDir, 'dist', IS_WIN ? 'atvremote.exe' : 'atvremote')

@@ -1,0 +1,54 @@
+import type { StreamTargetConfig } from '../backends/types.ts'
+import type { DiscoveredDevice } from '../backends/types.ts'
+import type { UserConfig } from '../config.ts'
+import type { LightInfo, DiscoveredBridge } from '../lights/types.ts'
+
+import type { AppState, ShowPhase } from './app-state.ts'
+
+export type { DiscoveredDevice, LightInfo, DiscoveredBridge }
+export type BackendInfo = { id: string; label: string }
+export type LightsPluginInfo = { id: string; label: string }
+
+export type MarqueeRPC = {
+  bun: {
+    requests: {
+      getState: { params: undefined; response: AppState }
+      listBackends: { params: undefined; response: BackendInfo[] }
+      discoverDevices: { params: { backendId: string }; response: DiscoveredDevice[] }
+      setupDevice: {
+        params: { backendId: string; device: DiscoveredDevice }
+        response: StreamTargetConfig
+      }
+      probeDevice: { params: { config: StreamTargetConfig }; response: boolean }
+      loadConfig: { params: undefined; response: AppState }
+      saveCueMode: { params: { mode: 'auto' | 'manual' }; response: void }
+      startShow: { params: undefined; response: void }
+      confirmStart: { params: undefined; response: void }
+      cancelShow: { params: undefined; response: void }
+      streamFile: { params: { filePath: string }; response: void }
+      setLightLevel: { params: { lightId: string; level: number }; response: void }
+      navigateTo: { params: { screen: AppState['screen'] }; response: void }
+      getFullConfig: { params: undefined; response: UserConfig | null }
+      saveConfigFields: { params: { fields: Partial<UserConfig> }; response: void }
+      validateTmdbKey: { params: { apiKey: string }; response: boolean }
+      listLightsPlugins: { params: undefined; response: LightsPluginInfo[] }
+      discoverLightBridges: { params: { pluginId: string }; response: DiscoveredBridge[] }
+      pairLightBridge: { params: { pluginId: string; ip: string }; response: string }
+      listLights: {
+        params: { pluginId: string; ip: string; credentials: string }
+        response: LightInfo[]
+      }
+    }
+    messages: {
+      logMessage: { level: string; message: string }
+    }
+  }
+  webview: {
+    requests: Record<string, never>
+    messages: {
+      appStateUpdate: AppState
+      setupProgress: { message: string }
+      phaseChanged: { phase: ShowPhase }
+    }
+  }
+}

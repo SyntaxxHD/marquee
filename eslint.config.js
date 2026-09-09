@@ -41,7 +41,11 @@ export default tseslint.config(
       'prettier.config.js',
       'node_modules/**',
       'dist/**',
-      'vendor/**'
+      'vendor/**',
+      '.hutch/**',
+      '.cottontail-tmp/**',
+      'build/**',
+      'artifacts/**'
     ]
   }
 )

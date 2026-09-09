@@ -3,7 +3,6 @@ process.env.NODE_HUE_API_USE_INSECURE_CONNECTION = '1'
 import type { model as HueModel } from 'node-hue-api'
 
 import { MarqueeError } from '../utils/errors.ts'
-import { logger } from '../utils/logger.ts'
 
 const { api: hueApi, discovery, model, ApiError } = await import('node-hue-api')
 
@@ -123,12 +122,12 @@ export class HueClient {
       await Promise.all(
         lightIds.map(id =>
           bridge.lights.setLightState(id, state).catch((err: Error) => {
-            logger.warn(`Hue light ${id} failed: ${err.message}`)
+            console.warn(`Hue light ${id} failed: ${err.message}`)
           })
         )
       )
     } catch (err) {
-      logger.warn(`Hue bridge unreachable: ${(err as Error).message}`)
+      console.warn(`Hue bridge unreachable: ${(err as Error).message}`)
     }
   }
 }

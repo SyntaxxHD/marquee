@@ -3,18 +3,14 @@ import { resolve, join } from 'path'
 
 import envPaths from 'env-paths'
 
+import type { StreamTargetConfig } from './backends/types.ts'
+import type { LightsConfig } from './lights/types.ts'
 import { MarqueeError } from './utils/errors.ts'
 
 export type OutputResolution = '1920x1080' | '3840x2160'
 export type OutputFps = 25 | 30 | 60
 export type AdSource = 'auto' | 'local'
 export type TrailerSource = 'auto' | 'local'
-
-export interface AppleTVConfig {
-  name: string
-  id: string
-  address: string
-}
 
 export interface UserConfig {
   tmdbApiKey: string
@@ -24,16 +20,11 @@ export interface UserConfig {
   trailerSource: TrailerSource
   trailersDir: string
   trailerCount: number
-  appleTV: AppleTVConfig | null
+  streamTarget: StreamTargetConfig | null
   language: string
   outputResolution: OutputResolution
   outputFps: OutputFps
-  hue: {
-    bridgeIp: string
-    username: string
-    controlledLightIds: string[]
-    dimPercent: number
-  } | null
+  lights: LightsConfig | null
 }
 
 export interface Config {
@@ -46,11 +37,11 @@ export interface Config {
   trailerCount: number
   cacheDir: string
   adsCacheDir: string
-  appleTV: AppleTVConfig | null
+  streamTarget: StreamTargetConfig | null
   language: string
   outputResolution: OutputResolution
   outputFps: OutputFps
-  hue: UserConfig['hue']
+  lights: LightsConfig | null
 }
 
 const paths = envPaths('marquee', { suffix: '' })
@@ -66,7 +57,20 @@ export const PYATV_STORAGE_FILE = join(paths.config, 'pyatv.json')
 export async function loadUserConfig(): Promise<UserConfig | null> {
   const file = Bun.file(USER_CONFIG_PATH)
   if (!(await file.exists())) return null
-  return file.json()
+  const raw = (await file.json()) as Record<string, unknown>
+
+  if (raw.streamTarget === undefined && raw.appleTV) {
+    const legacy = raw.appleTV as { name: string; id: string; address: string }
+    raw.streamTarget = { type: 'appletv', ...legacy }
+  }
+  delete raw.appleTV
+
+  if (raw.hue && !raw.lights) {
+    raw.lights = { type: 'hue', ...(raw.hue as object) }
+  }
+  delete raw.hue
+
+  return raw as unknown as UserConfig
 }
 
 export async function saveUserConfig(config: UserConfig): Promise<void> {
@@ -120,10 +124,10 @@ export async function loadConfig(): Promise<Config> {
     trailerCount: userConfig.trailerCount ?? 3,
     cacheDir: CACHE_DIR,
     adsCacheDir: ADS_CACHE_DIR,
-    appleTV: userConfig.appleTV,
+    streamTarget: userConfig.streamTarget,
     language: userConfig.language ?? 'de-DE',
     outputResolution: userConfig.outputResolution,
     outputFps: userConfig.outputFps,
-    hue: userConfig.hue
+    lights: userConfig.lights ?? null
   }
 }

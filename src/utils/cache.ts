@@ -1,8 +1,6 @@
 import { mkdir } from 'fs/promises'
 import { join } from 'path'
 
-import { logger } from './logger.ts'
-
 interface CacheEntry {
   youtubeId: string
   filePath: string
@@ -30,8 +28,7 @@ export class TrailerCache {
     if (await file.exists()) {
       this.index = await file.json()
     }
-    const purged = await this.purgeExpired()
-    if (purged > 0) logger.debug(`Purged ${purged} expired trailer(s) from cache`)
+    await this.purgeExpired()
   }
 
   async get(youtubeId: string): Promise<string | null> {

@@ -2,7 +2,8 @@ name: 🚀 Release
 
 on:
   push:
-    branches: [main]
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
@@ -13,43 +14,49 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v4
+
       - name: 🥟 Setup Bun
-        uses: oven-sh/setup-bun@v2.2.0
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
       - name: 📦 Install dependencies
         run: bun install --frozen-lockfile
+
       - name: 🔎 Type check
         run: bun run typecheck
+
       - name: 🧹 Lint
         run: bun run lint
-      - name: 💅 Format check
-        run: bun run format:check
 
   build:
     name: 🔨 Build ${{ matrix.artifact }}
     needs: checks
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            target: bun-darwin-arm64
-            artifact: marquee-macos-arm64
+          - os: mac-runner-6261
+            artifact: marquee-macos
+            built: artifacts/macos-arm64-marquee.dmg
+            release: artifacts/marquee.dmg
           - os: ubuntu-latest
-            target: bun-linux-x64
-            artifact: marquee-linux-x64
+            artifact: marquee-linux
+            built: artifacts/linux-x64-marquee.zip
+            release: artifacts/marquee.zip
           - os: windows-latest
-            target: bun-windows-x64
-            artifact: marquee-windows-x64.exe
+            artifact: marquee-windows
+            built: artifacts/windows-x64-marquee.zip
+            release: artifacts/marquee.zip
 
     steps:
       - name: 📥 Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v4
 
       - name: 🥟 Setup Bun
-        uses: oven-sh/setup-bun@v2.2.0
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
@@ -58,7 +65,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: 📦 Install dependencies
+      - name: 📦 Install npm dependencies
         run: bun install --frozen-lockfile
 
       - name: ♻️ Restore vendor cache
@@ -75,29 +82,44 @@ jobs:
       - name: 📺 Build atvremote into vendor/
         if: steps.cache-vendor.outputs.cache-hit != 'true'
         run: |
-          pip install pyinstaller
+          pip install "pyinstaller>=6,<7"
+          pip install "git+https://github.com/postlund/pyatv.git@refs/pull/2899/head"
           bun run scripts/build-atvremote.ts
 
-      - name: 🔨 Build binary
-        run: |
-          mkdir -p dist
-          bun build --compile --target ${{ matrix.target }} --outfile dist/${{ matrix.artifact }} src/index.ts
+      - name: 🛠️ Prepare Hutch devkit
+        run: npx electrobun prepare
 
-      - name: 💨 Smoke test (non-Windows)
-        if: runner.os != 'Windows'
-        run: ./dist/${{ matrix.artifact }}
+      - name: ⚡ Build Vite UI
+        run: bun x vite build
 
-      - name: 💨 Smoke test (Windows)
-        if: runner.os == 'Windows'
-        run: .\dist\${{ matrix.artifact }}
-        shell: pwsh
+      # Self-hosted runner has the certificate in Keychain already.
+      # To switch back to a GitHub-hosted runner, uncomment this and add
+      # APPLE_CERTIFICATE + APPLE_CERTIFICATE_PASSWORD to repo secrets:
+      # - name: 🔐 Import signing certificate
+      #   if: runner.os == 'macOS'
+      #   uses: apple-actions/import-codesign-certs@v7
+      #   with:
+      #     p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+      #     p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
-      - name: ⬆️ Upload artifact
+      - name: 🏗️ Build Electrobun app
+        run: npx electrobun build --env=stable
+        env:
+          ELECTROBUN_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+          ELECTROBUN_TEAMID: ${{ secrets.APPLE_TEAM_ID }}
+          ELECTROBUN_APPLEID: ${{ secrets.APPLE_ID }}
+          ELECTROBUN_APPLEIDPASS: ${{ secrets.APPLE_APP_PASSWORD }}
+
+      - name: 🏷️ Rename distributable
+        shell: bash
+        run: mv "${{ matrix.built }}" "${{ matrix.release }}"
+
+      - name: ⬆️ Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.artifact }}
-          retention-days: 1
+          path: artifacts/
+          retention-days: 7
 
   release:
     name: 📦 Publish release
@@ -105,7 +127,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v4
 
       - name: 🏷️ Get version
         id: pkg
@@ -117,11 +139,11 @@ jobs:
           path: dist/
           merge-multiple: true
 
-      - name: 🚀 Publish
-        uses: softprops/action-gh-release@v3.0.1
+      - name: 🚀 Publish GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.pkg.outputs.version }}
-          name: marquee v${{ steps.pkg.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          name: marquee ${{ github.ref_name }}
           generate_release_notes: true
-          files: dist/*
-          fail_on_unmatched_files: true
+          files: dist/**/*
+          fail_on_unmatched_files: false

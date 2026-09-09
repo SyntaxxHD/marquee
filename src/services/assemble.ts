@@ -7,8 +7,6 @@ import type { OutputResolution, OutputFps } from '../config.ts'
 import { resolveBinaries } from '../utils/bins.ts'
 import { MarqueeError } from '../utils/errors.ts'
 import { exec } from '../utils/exec.ts'
-import { logger } from '../utils/logger.ts'
-import { createProgressBar } from '../utils/progress.ts'
 
 export interface AssembleInput {
   files: string[]
@@ -38,14 +36,12 @@ async function pickVideoEncoder(ffmpegPath: string): Promise<VideoEncoder> {
     captureOutput: true,
     silent: true
   })
-  const available = result.stdout
 
-  const hw = HW_ENCODERS.find(name => available.includes(name))
+  const hw = HW_ENCODERS.find(name => result.stdout.includes(name))
   cachedEncoder = hw
     ? { codec: hw, hardware: true }
     : { codec: 'libx264', hardware: false }
 
-  logger.debug(`Using video encoder: ${cachedEncoder.codec}`)
   return cachedEncoder
 }
 
@@ -60,12 +56,9 @@ function normalizeSegment(
   width: number,
   height: number,
   fps: OutputFps,
-  encoder: VideoEncoder,
-  step: string,
-  label: string
+  encoder: VideoEncoder
 ): Promise<void> {
   const is4K = width >= 3840
-  const bar = createProgressBar({ step, label })
   return new Promise((resolve, reject) => {
     const command = ffmpeg(input)
       .videoFilters([
@@ -91,15 +84,10 @@ function normalizeSegment(
       .audioChannels(2)
       .addOutputOption('-movflags +faststart')
       .output(output)
-      .on('progress', p => bar.update(p.percent ?? 0))
-      .on('end', () => {
-        bar.finish()
-        resolve()
-      })
-      .on('error', (err: Error) => {
-        bar.finish()
+      .on('end', () => resolve())
+      .on('error', (err: Error) =>
         reject(new MarqueeError(`ffmpeg normalize failed: ${err.message}`))
-      })
+      )
       .run()
   })
 }
@@ -117,22 +105,10 @@ export async function assemblePreshow(input: AssembleInput): Promise<AssembleRes
   const normalized: string[] = []
   const total = input.files.length
 
-  const accel = encoder.hardware ? ' (hardware accelerated)' : ''
-  logger.info(`🔧 Normalizing ${total} segment(s)${accel}...`)
   for (let i = 0; i < total; i++) {
     const file = input.files[i]
     const outPath = join(input.tmpDir, `normalized-${i}.mp4`)
-    const label = file.split('/').pop() ?? file
-    await normalizeSegment(
-      file,
-      outPath,
-      width,
-      height,
-      input.fps,
-      encoder,
-      `[${i + 1}/${total}]`,
-      label
-    )
+    await normalizeSegment(file, outPath, width, height, input.fps, encoder)
     normalized.push(outPath)
   }
 
@@ -142,33 +118,21 @@ export async function assemblePreshow(input: AssembleInput): Promise<AssembleRes
 
   const outputPath = join(input.outputDir, `marquee-${Date.now()}.mp4`)
 
-  logger.info('✂️  Concatenating segments...')
-  const concatBar = createProgressBar({ step: '[concat]', label: 'Joining' })
   await new Promise<void>((resolve, reject) => {
     ffmpeg()
       .input(concatFile)
       .inputOptions(['-f concat', '-safe 0'])
       .outputOptions(['-c copy', '-movflags +faststart'])
       .output(outputPath)
-      .on('progress', p => concatBar.update(p.percent ?? 0))
-      .on('end', () => {
-        concatBar.finish()
-        resolve()
-      })
-      .on('error', (err: Error) => {
-        concatBar.finish()
+      .on('end', () => resolve())
+      .on('error', (err: Error) =>
         reject(new MarqueeError(`ffmpeg concat failed: ${err.message}`))
-      })
+      )
       .run()
   })
 
-  logger.debug('Cleaning up normalized intermediates...')
   for (const f of normalized) {
-    try {
-      await unlink(f)
-    } catch (err) {
-      logger.debug(`Could not remove ${f}: ${(err as Error).message}`)
-    }
+    await unlink(f).catch(() => {})
   }
 
   return { outputPath }

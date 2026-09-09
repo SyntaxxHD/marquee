@@ -1,60 +1,99 @@
-# 🎬 marquee
+<div align="center">
+  <img src="src/mainview/assets/logo.svg" alt="marquee" width="480" />
+  <p>Your own cinema pre-show, for your living room.</p>
+</div>
 
-Your own cinema pre-show. `marquee` builds a reel of ads and movie trailers, streams it to your Apple TV over AirPlay, and dims your Philips Hue lights as the show begins, just like the theater right before your movie starts.
+---
 
-## ✨ What it does
+marquee builds a reel of ads and trailers, streams it to your Apple TV over AirPlay, and dims your Philips Hue lights as the show begins. When it ends, the lights go off so your movie can start.
 
-1. Turns your lights to a warm, bright glow
-2. Grabs a few ads, either the current top YouTube ads for your region or your own local folder
-3. Adds movie trailers, either fresh ones via [TMDB](https://www.themoviedb.org/) or your own local folder
-4. Splices everything into one seamless video
-5. Streams it to your Apple TV, dims the lights, and when it ends, turns them off so your movie can start
+## Install
 
-## 📥 Install
+Download the app for your platform from the [latest release](../../releases/latest):
 
-Download the binary for your platform from the [latest release](../../releases/latest):
+| Platform | File          |
+| -------- | ------------- |
+| macOS    | `marquee.dmg` |
+| Linux    | `marquee.zip` |
+| Windows  | `marquee.zip` |
 
-| Platform              | File                      |
-| --------------------- | ------------------------- |
-| macOS (Apple Silicon) | `marquee-macos-arm64`     |
-| Linux                 | `marquee-linux-x64`       |
-| Windows               | `marquee-windows-x64.exe` |
+## Getting started
 
-## 🚀 Getting started
+1. Open the app. It opens to the **Control Room**
+2. Click the settings icon in the Playback panel to run the **Setup wizard**
+3. Pick a playback method, scan for your Apple TV, and enter the PIN shown on screen
+4. Optionally connect your Philips Hue bridge and pick which lights to control
+5. Hit **Assemble Pre-show**. marquee handles the rest
 
-**1. Choose your sources.** During setup you pick where ads and trailers come from, each independently:
+## Development
 
-- **Automatic ads** pull the current top YouTube ads for your region. **Local ads** use your own videos from a folder.
-- **Automatic trailers** fetch fresh movie trailers via TMDB (needs a free API key, setup will ask). **Local trailers** use your own videos from a folder.
-
-**2. Run it.**
-
-```bash
-marquee run
-```
-
-The first run walks you through setup: it asks for your ad and trailer sources (plus a TMDB key if trailers are automatic), finds your Apple TV and pairs with it (enter the PIN shown on your TV), lets you pick your language/region and output quality, and optionally connects your Hue bridge and lights. Everything is saved to `~/.config/marquee/config.json`. Re-run `marquee setup` any time to change it.
-
-The assembled video is temporary. It streams to your Apple TV and is cleaned up afterward, so there is nothing to manage on disk.
-
-## 🕹️ Commands
-
-| Command                 | What it does                                  |
-| ----------------------- | --------------------------------------------- |
-| `marquee run`           | Build the reel and stream it                  |
-| `marquee stream <file>` | Play an already-built video                   |
-| `marquee setup`         | Re-run the setup wizard                       |
-| `marquee check`         | Verify everything is configured and reachable |
-
-## 🛠️ Development
-
-Built with [Bun](https://bun.sh) + TypeScript.
-
-```bash
+```sh
 bun install
-bun run download-bins # fetch ffmpeg, ffprobe, yt-dlp into vendor/
-pip install pyinstaller # build tool for atvremote (pyatv is pinned by the script)
-bun run scripts/build-atvremote.ts # build atvremote (AirPlay)
-bun run start <command> # run from source
-bun run build:binary # compile a standalone binary
+bun run download-bins                # fetch ffmpeg, ffprobe, yt-dlp into vendor/
+bun run scripts/build-atvremote.ts   # build the atvremote binary
+hutch run dev                        # launch the desktop app with watch mode
 ```
+
+Type check and lint:
+
+```sh
+bun run typecheck
+bun run lint
+```
+
+## Adding a playback backend
+
+marquee has a `StreamingBackend` system. Contributors can add new ones in three steps:
+
+**1.** Create `src/backends/<name>.ts` implementing `StreamingBackend<YourConfig>`:
+
+```ts
+import type { StreamingBackend } from './types.ts'
+
+export interface MyConfig {
+  type: 'mybackend'
+  deviceId: string
+}
+
+export const myBackend: StreamingBackend<MyConfig> = {
+  id: 'mybackend',
+  label: 'My Backend',
+  async discover() {
+    /* return DiscoveredDevice[] */
+  },
+  async setup(device) {
+    return { type: 'mybackend', deviceId: device.id }
+  },
+  async probe(config) {
+    /* return true if reachable */
+  },
+  async play(filePath, config) {
+    /* stream the file */
+  }
+}
+```
+
+**2.** Add `MyConfig` to the union in `src/backends/types.ts`:
+
+```ts
+export type StreamTargetConfig = AppleTVConfig | QuickTimeConfig | MyConfig
+```
+
+**3.** Register it in `src/backends/registry.ts`:
+
+```ts
+[myBackend.id, myBackend as StreamingBackend<StreamTargetConfig>],
+```
+
+The Setup wizard and all RPC handlers pick it up automatically.
+
+If your backend needs to serve a local file over HTTP (e.g. for a receiver that pulls rather than being pushed to), reuse `serveFile` from `src/services/file-server.ts`. It handles range requests, which tvOS requires.
+
+## Tech stack
+
+- [Electrobun](https://electrobun.dev) (desktop shell, Bun backend + native webview)
+- [Svelte 5](https://svelte.dev) (UI, runes reactivity)
+- [Vite](https://vitejs.dev) (webview bundler)
+- [pyatv](https://github.com/postlund/pyatv) (AirPlay via `atvremote`, PyInstaller-bundled)
+- [fluent-ffmpeg](https://github.com/fluent-ffmpeg/node-fluent-ffmpeg) (pre-show assembly)
+- [node-hue-api](https://github.com/peter-murray/node-hue-api) (Philips Hue)

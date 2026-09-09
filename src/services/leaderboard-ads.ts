@@ -2,7 +2,6 @@ import { join } from 'path'
 
 import { TrailerCache } from '../utils/cache.ts'
 import { MarqueeError } from '../utils/errors.ts'
-import { logger } from '../utils/logger.ts'
 import { downloadVideo } from '../utils/ytdlp.ts'
 
 import type { AdResult } from './ads.ts'
@@ -85,13 +84,11 @@ export class LeaderboardAdService {
 
     for (const video of shuffle(videos)) {
       if (results.length >= count) break
-
-      const step = `[${results.length + 1}/${count}]`
       try {
-        const result = await this.getOrDownload(video, step)
+        const result = await this.getOrDownload(video)
         results.push(result)
       } catch (err) {
-        logger.warn(`Skipping ad "${video.video_title}": ${(err as Error).message}`)
+        console.warn(`Skipping ad "${video.video_title}": ${(err as Error).message}`)
       }
     }
 
@@ -106,7 +103,6 @@ export class LeaderboardAdService {
 
   private async fetchLeaderboard(): Promise<LeaderboardVideo[]> {
     const url = leaderboardUrl(this.region)
-    logger.debug(`Fetching ad leaderboard: ${url}`)
 
     let res: Response
     try {
@@ -150,11 +146,8 @@ export class LeaderboardAdService {
     }
 
     if (previous?.lastModified === lastModified) {
-      logger.debug('Ad leaderboard unchanged since last run')
       return
     }
-
-    logger.debug('Ad leaderboard updated. Refreshing cached list')
     await Bun.write(
       sidecarPath,
       JSON.stringify(
@@ -165,19 +158,15 @@ export class LeaderboardAdService {
     )
   }
 
-  private async getOrDownload(video: LeaderboardVideo, step: string): Promise<AdResult> {
+  private async getOrDownload(video: LeaderboardVideo): Promise<AdResult> {
     const fileName = `${video.video_id}.mp4`
     const cached = await this.cache.get(video.video_id)
     if (cached) {
-      logger.step(0, 0, `${video.customer_name} (cached)`)
       return { filePath: cached, fileName }
     }
 
     const outputPath = join(this.cache['cacheDir'], fileName)
-    await downloadVideo(video.video_id, outputPath, {
-      step,
-      label: video.customer_name
-    })
+    await downloadVideo(video.video_id, outputPath)
 
     if (!(await Bun.file(outputPath).exists())) {
       throw new Error('Download completed but output file not found')

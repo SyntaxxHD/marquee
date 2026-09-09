@@ -1,7 +1,5 @@
 import { rm } from 'fs/promises'
 
-import { logger } from './logger.ts'
-
 let activeTmpDir: string | null = null
 
 export function setActiveTmpDir(dir: string | null): void {
@@ -14,7 +12,7 @@ export async function cleanupTmpDir(): Promise<void> {
   activeTmpDir = null
   try {
     await rm(dir, { recursive: true, force: true })
-  } catch (err) {
-    logger.debug(`Cleanup failed for ${dir}: ${(err as Error).message}`)
+  } catch {
+    // ignore cleanup errors
   }
 }

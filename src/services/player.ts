@@ -1,5 +1,4 @@
 import { mkdir } from 'fs/promises'
-import { networkInterfaces } from 'os'
 import { dirname } from 'path'
 
 import multicastDns from 'multicast-dns'
@@ -8,7 +7,8 @@ import { PYATV_STORAGE_FILE } from '../config.ts'
 import { resolveBinaries } from '../utils/bins.ts'
 import { MarqueeError } from '../utils/errors.ts'
 import { execOrThrow, exec } from '../utils/exec.ts'
-import { logger } from '../utils/logger.ts'
+
+import { serveFile } from './file-server.ts'
 
 export interface DiscoveredAppleTV {
   name: string
@@ -57,30 +57,6 @@ export async function discoverAppleTVs(timeoutMs = 5000): Promise<DiscoveredAppl
       resolve(Array.from(found.values()))
     }, timeoutMs)
   })
-}
-
-function getLocalIp(targetIp: string): string {
-  const target = targetIp.split('.').slice(0, 3).join('.')
-  for (const ifaces of Object.values(networkInterfaces())) {
-    for (const iface of ifaces ?? []) {
-      if (
-        iface.family === 'IPv4' &&
-        !iface.internal &&
-        iface.address.startsWith(target)
-      ) {
-        return iface.address
-      }
-    }
-  }
-
-  for (const ifaces of Object.values(networkInterfaces())) {
-    for (const iface of ifaces ?? []) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address
-      }
-    }
-  }
-  throw new MarqueeError('Could not determine local IP address.')
 }
 
 async function resolveIdentifier(address: string): Promise<string> {
@@ -141,7 +117,7 @@ export async function pairAppleTV(target: AppleTVTarget): Promise<void> {
 
   for (const protocol of ['companion', 'airplay']) {
     const label = protocol === 'companion' ? 'control' : 'AirPlay'
-    logger.info(`Enter the ${label} PIN shown on your TV:`)
+    console.log(`Enter the ${label} PIN shown on your TV:`)
 
     const args = [
       ...atvremoteArgs(bins.atvremote, target),
@@ -165,73 +141,18 @@ export async function resolveTarget(
   return { name, id, address }
 }
 
-function serveFile(
-  filePath: string,
-  targetIp: string
-): { fileUrl: string; stopServer: () => void } {
-  const localIp = getLocalIp(targetIp)
-  const port = 47820 + Math.floor(Math.random() * 100)
-  const fileUrl = `http://${localIp}:${port}/video.mp4`
-  const file = Bun.file(filePath)
-  const fileSize = file.size
-
-  const server = Bun.serve({
-    port,
-    fetch(req) {
-      const url = new URL(req.url)
-      if (url.pathname !== '/video.mp4') return new Response('Not found', { status: 404 })
-
-      const rangeHeader = req.headers.get('range')
-      const baseHeaders = {
-        'Content-Type': 'video/mp4',
-        'Accept-Ranges': 'bytes',
-        'Access-Control-Allow-Origin': '*'
-      }
-
-      if (rangeHeader) {
-        const match = rangeHeader.match(/bytes=(\d*)-(\d*)/)
-        const start = match?.[1] ? parseInt(match[1]) : 0
-
-        const end = match?.[2] ? parseInt(match[2]) : fileSize - 1
-        const chunkSize = end - start + 1
-        return new Response(file.slice(start, end + 1), {
-          status: 206,
-          headers: {
-            ...baseHeaders,
-            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-            'Content-Length': String(chunkSize)
-          }
-        })
-      }
-
-      return new Response(file, {
-        headers: { ...baseHeaders, 'Content-Length': String(fileSize) }
-      })
-    }
-  })
-
-  return { fileUrl, stopServer: () => server.stop(true) }
-}
-
 export async function playViaAppleTV(
   filePath: string,
   appleTV: AppleTVTarget
 ): Promise<void> {
   const bins = await resolveBinaries()
   const { fileUrl, stopServer } = serveFile(filePath, appleTV.address)
-  logger.debug(`Serving video at ${fileUrl}`)
 
   try {
-    logger.info(`▶️  Sending to ${appleTV.name} (${appleTV.address})`)
+    console.log(`Sending to ${appleTV.name} (${appleTV.address})`)
 
     const args = [...atvremoteArgs(bins.atvremote, appleTV), `play_url=${fileUrl}`]
-    const result = await exec(args, { captureOutput: true, silent: true })
-
-    if (result.exitCode !== 0) {
-      logger.debug(
-        `play_url exited ${result.exitCode}. Continuing to serve (stderr: ${result.stderr.trim()})`
-      )
-    }
+    await exec(args, { captureOutput: true, silent: true })
 
     await waitForPlaybackEnd(bins.atvremote, appleTV)
   } finally {
@@ -243,7 +164,6 @@ async function waitForPlaybackEnd(
   atvremote: string,
   target: AppleTVTarget
 ): Promise<void> {
-  logger.debug('Polling playback state...')
   await Bun.sleep(10000)
 
   const maxPolls = 720 // 1 hour max

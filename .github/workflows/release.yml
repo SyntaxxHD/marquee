@@ -40,10 +40,16 @@ jobs:
         include:
           - os: macos-latest
             artifact: marquee-macos
+            built: artifacts/macos-arm64-marquee.dmg
+            release: artifacts/marquee.dmg
           - os: ubuntu-latest
             artifact: marquee-linux
+            built: artifacts/linux-x64-marquee-Setup.tar.gz
+            release: artifacts/marquee.tar.gz
           - os: windows-latest
             artifact: marquee-windows
+            built: artifacts/win-x64-marquee-Setup.zip
+            release: artifacts/marquee.zip
 
     steps:
       - name: 📥 Checkout
@@ -101,9 +107,9 @@ jobs:
           ELECTROBUN_APPLEID: ${{ secrets.APPLE_ID }}
           ELECTROBUN_APPLEIDPASS: ${{ secrets.APPLE_APP_PASSWORD }}
 
-      - name: 🔎 List artifacts
+      - name: 🏷️ Rename distributable
         shell: bash
-        run: ls -1 artifacts/
+        run: mv "${{ matrix.built }}" "${{ matrix.release }}"
 
       - name: ⬆️ Upload artifacts
         uses: actions/upload-artifact@v4

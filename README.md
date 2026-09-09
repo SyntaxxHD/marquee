@@ -11,11 +11,11 @@ marquee builds a reel of ads and trailers, streams it to your Apple TV over AirP
 
 Download the app for your platform from the [latest release](../../releases/latest):
 
-| Platform | File          |
-| -------- | ------------- |
-| macOS    | `marquee.dmg` |
-| Linux    | `marquee.zip` |
-| Windows  | `marquee.zip` |
+| Platform | File             |
+| -------- | ---------------- |
+| macOS    | `marquee.dmg`    |
+| Linux    | `marquee.tar.gz` |
+| Windows  | `marquee.zip`    |
 
 ## Getting started
 

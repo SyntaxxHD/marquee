@@ -27,6 +27,3 @@ bun.lock
 # Logs
 logs/
 *.log
-
-# Claude
-.claude/skills/

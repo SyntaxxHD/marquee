@@ -1,0 +1,41 @@
+---
+description: marquee project conventions — code style, Svelte 5 runes, plugin architecture, quality gates
+alwaysApply: true
+---
+
+# marquee project rules
+
+Cinema pre-show assembler. Streams ads/trailers to Apple TV via AirPlay, dims Philips Hue lights. Desktop app built with Electrobun (Bun backend + native webview).
+
+## Code style
+
+- No semicolons, single quotes, no trailing commas
+- Arrow functions omit parens for single arg: `x => x`
+- Print width 90, 2-space indent, LF line endings
+- Import ordering: builtin → external → internal → parent → sibling (blank line between groups)
+- `import type` for type-only imports (ESLint enforces this)
+- No code comments unless the WHY is non-obvious
+
+## Quality gates — run before every commit
+
+```sh
+bun run typecheck    # tsc --noEmit strict
+bun run lint         # eslint flat config
+bun run format:check # prettier --check
+```
+
+Fix: `bun run lint:fix` + `bun run format`
+
+## Svelte 5 — runes only
+
+Use `$state`, `$derived`, `$effect`, `$props`, `$bindable`. Never use Svelte 4 stores, `createEventDispatcher`, or `<slot>`. Event handlers: `onclick` not `on:click`. Snippets: `{#snippet foo()}` + `{@render foo()}`.
+
+## Plugin architectures
+
+**Backends** (`src/backends/`): implement `StreamingBackend<TConfig>`, add to `StreamTargetConfig` union, register in `registry.ts`. Existing: `appletv`, `quicktime`.
+
+**Lights** (`src/lights/`): implement `LightsPlugin<TConfig>`, register in `registry.ts`. Existing: `hue`.
+
+## UI aesthetic
+
+Cinema control room, not SaaS. No card shadows, pill buttons, or gradients. Pro A/V software feel.

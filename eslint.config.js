@@ -45,7 +45,8 @@ export default tseslint.config(
       '.hutch/**',
       '.cottontail-tmp/**',
       'build/**',
-      'artifacts/**'
+      'artifacts/**',
+      '.claude/**'
     ]
   }
 )

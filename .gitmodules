@@ -1,0 +1,6 @@
+[submodule ".claude/vendors/svelte-claude-skills"]
+	path = .claude/vendors/svelte-claude-skills
+	url = https://github.com/spences10/svelte-claude-skills.git
+[submodule ".claude/skills/electrobun"]
+	path = .claude/skills/electrobun
+	url = https://github.com/marketcalls/electrobun-skill.git

@@ -38,18 +38,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: mac-runner-6261
+          - os: macos-latest
             artifact: marquee-macos
-            built: artifacts/macos-arm64-marquee.dmg
-            release: artifacts/marquee.dmg
           - os: ubuntu-latest
             artifact: marquee-linux
-            built: artifacts/linux-x64-marquee.zip
-            release: artifacts/marquee.zip
           - os: windows-latest
             artifact: marquee-windows
-            built: artifacts/windows-x64-marquee.zip
-            release: artifacts/marquee.zip
 
     steps:
       - name: 📥 Checkout
@@ -92,15 +86,12 @@ jobs:
       - name: ⚡ Build Vite UI
         run: bun x vite build
 
-      # Self-hosted runner has the certificate in Keychain already.
-      # To switch back to a GitHub-hosted runner, uncomment this and add
-      # APPLE_CERTIFICATE + APPLE_CERTIFICATE_PASSWORD to repo secrets:
-      # - name: 🔐 Import signing certificate
-      #   if: runner.os == 'macOS'
-      #   uses: apple-actions/import-codesign-certs@v7
-      #   with:
-      #     p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
-      #     p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      - name: 🔐 Import signing certificate
+        if: runner.os == 'macOS'
+        uses: apple-actions/import-codesign-certs@v7
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
       - name: 🏗️ Build Electrobun app
         run: npx electrobun build --env=stable
@@ -110,9 +101,9 @@ jobs:
           ELECTROBUN_APPLEID: ${{ secrets.APPLE_ID }}
           ELECTROBUN_APPLEIDPASS: ${{ secrets.APPLE_APP_PASSWORD }}
 
-      - name: 🏷️ Rename distributable
+      - name: 🔎 List artifacts
         shell: bash
-        run: mv "${{ matrix.built }}" "${{ matrix.release }}"
+        run: ls -1 artifacts/
 
       - name: ⬆️ Upload artifacts
         uses: actions/upload-artifact@v4

@@ -2,10 +2,11 @@
   interface Props {
     checked?: boolean
     label?: string
+    offLabel?: string
     onchange?: (checked: boolean) => void
   }
 
-  let { checked = $bindable(false), label, onchange }: Props = $props()
+  let { checked = $bindable(false), label, offLabel, onchange }: Props = $props()
 
   function toggle() {
     checked = !checked
@@ -14,11 +15,14 @@
 </script>
 
 <label class="toggle" class:is-on={checked}>
+  {#if offLabel}
+    <span class="toggle-off-label">{offLabel}</span>
+  {/if}
   <button
     class="track"
     role="switch"
     aria-checked={checked}
-    aria-label={label}
+    aria-label={label ?? offLabel}
     onclick={toggle}
   >
     <span class="thumb"></span>
@@ -69,6 +73,15 @@
   .toggle.is-on .thumb {
     left: 20px;
     background: var(--status-run);
+  }
+
+  .toggle-off-label {
+    font-size: 12px;
+    color: var(--text-primary);
+  }
+
+  .toggle.is-on .toggle-off-label {
+    color: var(--text-secondary);
   }
 
   .toggle-label {

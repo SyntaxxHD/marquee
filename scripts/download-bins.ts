@@ -10,14 +10,18 @@ async function main() {
 
   // --- ffmpeg ---
   const ffmpegStatic = (await import('ffmpeg-static')).default
-  if (!ffmpegStatic) throw new Error('ffmpeg-static returned null path')
+  if (!ffmpegStatic) {
+    throw new Error('ffmpeg-static returned null path')
+  }
 
   const ffmpegDest = join(VENDOR, 'ffmpeg')
   console.log(`Copying ffmpeg: ${ffmpegStatic} → ${ffmpegDest}`)
 
   await copyFile(ffmpegStatic, ffmpegDest)
 
-  if (!IS_WIN) await chmod(ffmpegDest, 0o755)
+  if (!IS_WIN) {
+    await chmod(ffmpegDest, 0o755)
+  }
 
   // --- ffprobe ---
   const ffprobeInstaller = await import('@ffprobe-installer/ffprobe')
@@ -27,7 +31,9 @@ async function main() {
 
   await copyFile(ffprobeSrc, ffprobeDest)
 
-  if (!IS_WIN) await chmod(ffprobeDest, 0o755)
+  if (!IS_WIN) {
+    await chmod(ffprobeDest, 0o755)
+  }
 
   // --- yt-dlp ---
   const ytDlpDest = join(VENDOR, 'yt-dlp')
@@ -44,7 +50,9 @@ async function main() {
   const bytes = new Uint8Array(await res.arrayBuffer())
   await Bun.write(ytDlpDest, bytes)
 
-  if (!IS_WIN) await chmod(ytDlpDest, 0o755)
+  if (!IS_WIN) {
+    await chmod(ytDlpDest, 0o755)
+  }
 
   console.log('\n✅ vendor/ populated successfully')
   console.log('   Contents:')

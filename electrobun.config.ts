@@ -21,7 +21,15 @@ export default {
       'vendor/yt-dlp': 'vendor/yt-dlp',
       'vendor/atvremote': 'vendor/atvremote'
     },
-    watch: ['src/desktop', 'src/services', 'src/backends', 'src/commands'],
+    watch: [
+      'src/desktop',
+      'src/services',
+      'src/backends',
+      'src/commands',
+      'src/utils',
+      'src/lights',
+      'src/shared'
+    ],
     watchIgnore: ['dist/**'],
     mac: {
       bundleCEF: false,

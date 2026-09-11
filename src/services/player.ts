@@ -37,7 +37,9 @@ export async function discoverAppleTVs(timeoutMs = 5000): Promise<DiscoveredAppl
         }
         if (answer.type === 'SRV' && answer.name.endsWith('._airplay._tcp.local')) {
           const target = (answer.data as { target?: string })?.target
-          if (target) services.set(answer.name, target)
+          if (target) {
+            services.set(answer.name, target)
+          }
         }
       }
     })
@@ -48,7 +50,9 @@ export async function discoverAppleTVs(timeoutMs = 5000): Promise<DiscoveredAppl
       const found = new Map<string, DiscoveredAppleTV>()
       for (const [service, target] of services) {
         const ip = addresses.get(target)
-        if (!ip) continue
+        if (!ip) {
+          continue
+        }
 
         const name = service.replace(/\._airplay\._tcp\.local$/, '')
         found.set(ip, { name, ip })
@@ -76,8 +80,11 @@ async function resolveIdentifier(address: string): Promise<string> {
     }
     if (inIds) {
       const m = line.match(/^\s*-\s*(.+?)\s*$/)
-      if (m) idLines.push(m[1])
-      else break
+      if (m) {
+        idLines.push(m[1])
+      } else {
+        break
+      }
     }
   }
 
@@ -170,11 +177,14 @@ async function waitForPlaybackEnd(
   for (let i = 0; i < maxPolls; i++) {
     const args = [...atvremoteArgs(atvremote, target), 'playing']
     const result = await exec(args, { captureOutput: true, silent: true })
-    if (result.exitCode !== 0) break
+    if (result.exitCode !== 0) {
+      break
+    }
     const state = result.stdout.toLowerCase()
 
-    if (state.includes('devicestate: idle') || state.includes('devicestate: stopped'))
+    if (state.includes('devicestate: idle') || state.includes('devicestate: stopped')) {
       break
+    }
     await Bun.sleep(5000)
   }
 }

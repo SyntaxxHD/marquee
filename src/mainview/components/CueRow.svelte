@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { CueItem } from '$shared/app-state.ts'
+  import { CueStatus } from '$shared/app-state.ts'
   import StatusBadge from './StatusBadge.svelte'
 
   interface Props {
@@ -9,15 +10,17 @@
 
   let { cue, index }: Props = $props()
 
-  const STATE_MAP = {
-    pending: 'idle',
-    active: 'active',
-    done: 'done',
-    error: 'fault'
-  } as const
+  const STATE_MAP: Record<CueStatus, string> = {
+    [CueStatus.Pending]: 'idle',
+    [CueStatus.Active]: 'active',
+    [CueStatus.Done]: 'done',
+    [CueStatus.Error]: 'fault'
+  }
 
   function formatDuration(ms: number | null): string {
-    if (ms === null) return '--'
+    if (ms === null) {
+      return '--'
+    }
     const s = Math.floor(ms / 1000)
     const m = Math.floor(s / 60)
     const sec = s % 60
@@ -25,7 +28,7 @@
   }
 </script>
 
-<div class="row" class:is-active={cue.status === 'active'} class:is-done={cue.status === 'done'}>
+<div class="row" class:is-active={cue.status === CueStatus.Active} class:is-done={cue.status === CueStatus.Done}>
   <span class="index">{String(index + 1).padStart(2, '0')}</span>
   <span class="label">{cue.label}</span>
   <span class="dur">{formatDuration(cue.durationMs)}</span>

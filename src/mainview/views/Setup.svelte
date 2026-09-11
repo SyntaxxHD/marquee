@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { Check } from 'lucide-svelte'
+  import { Check, ChevronDown } from 'lucide-svelte'
   import { rpc } from '../rpc.ts'
   import { appState } from '../store.ts'
   import type { BackendInfo, DiscoveredDevice, LightsPluginInfo, LightInfo, DiscoveredBridge } from '$shared/rpc-schema.ts'
   import type { UserConfig, OutputResolution, OutputFps, AdSource, TrailerSource } from '../../config.ts'
+  import { TMDB_LANGUAGES, ADS_LANGUAGES } from '$shared/languages.ts'
   import Button from '../components/Button.svelte'
   import SectionPanel from '../components/SectionPanel.svelte'
   import TextInput from '../components/TextInput.svelte'
@@ -33,9 +34,7 @@
   }
 
   function setSection(s: Section) {
-    sectionStates[activeSection] = activeSection === s ? 'active' : sectionStates[activeSection]
     activeSection = s
-    sectionStates[s] = 'active'
   }
 
   function markDone(s: Section) {
@@ -55,11 +54,19 @@
 
   async function loadExisting() {
     const config = await rpc.request.getFullConfig()
-    if (!config) return
+    if (!config) {
+      return
+    }
 
-    if (config.streamTarget) markDone('playback')
+    if (config.streamTarget) {
+      configuredTarget = config.streamTarget
+      playbackStep = 'done'
+      markDone('playback')
+    }
+
     if (config.tmdbApiKey || config.trailerSource === 'local') {
       tmdbKey = config.tmdbApiKey ?? ''
+      tmdbValid = config.tmdbApiKey ? true : null
       trailerSource = config.trailerSource ?? 'auto'
       trailerCount = config.trailerCount ?? 3
       trailersDir = config.trailersDir ?? ''
@@ -67,6 +74,7 @@
       adCount = config.adCount ?? 4
       adsDir = config.adsDir ?? ''
       language = config.language ?? 'en-US'
+      adsLanguage = config.adsLanguage ?? 'en-US'
       markDone('content')
     }
     if (config.outputResolution && config.outputFps) {
@@ -86,6 +94,7 @@
 
   // --- Section 1: Playback ---
   let playbackStep = $state<PlaybackStep>('method')
+  let configuredTarget = $state<UserConfig['streamTarget']>(null)
   let backends = $state<BackendInfo[]>([])
   let selectedBackendId = $state('')
   let devices = $state<DiscoveredDevice[]>([])
@@ -95,10 +104,17 @@
   let pairing = $state(false)
   let playbackError = $state<string | null>(null)
 
+  function targetLabel(t: NonNullable<UserConfig['streamTarget']>): string {
+    return t.type === 'appletv' ? t.name : t.deviceName
+  }
+
   $effect(() => {
     rpc.request.listBackends().then(b => {
       backends = b
-      if (b.length > 0) selectedBackendId = b[0].id
+
+      if (b.length > 0) {
+        selectedBackendId = b[0].id
+      }
     })
   })
 
@@ -120,7 +136,10 @@
   }
 
   async function startPairing() {
-    if (!selectedDevice) return
+    if (!selectedDevice) {
+      return
+    }
+
     playbackStep = 'pair'
     pairing = true
     playbackError = null
@@ -139,9 +158,13 @@
 
   function backPlayback() {
     playbackError = null
-    if (playbackStep === 'scan') playbackStep = 'method'
-    else if (playbackStep === 'select') playbackStep = 'method'
-    else if (playbackStep === 'pair') playbackStep = 'select'
+    if (playbackStep === 'scan') {
+      playbackStep = 'method'
+    } else if (playbackStep === 'select') {
+      playbackStep = 'method'
+    } else if (playbackStep === 'pair') {
+      playbackStep = 'select'
+    }
   }
 
   function advanceToContent() {
@@ -160,12 +183,17 @@
   let adCount = $state(4)
   let adsDir = $state('')
   let language = $state('en-US')
+  let adsLanguage = $state('en-US')
 
   async function validateTmdb() {
     tmdbValidating = true
     tmdbValid = null
     try {
       tmdbValid = await rpc.request.validateTmdbKey({ apiKey: tmdbKey })
+
+      if (tmdbValid) {
+        await rpc.request.saveConfigFields({ fields: { tmdbApiKey: tmdbKey } })
+      }
     } finally {
       tmdbValidating = false
     }
@@ -177,7 +205,7 @@
 
   async function saveContent() {
     await rpc.request.saveConfigFields({
-      fields: { tmdbApiKey: tmdbKey, trailerSource, trailerCount, trailersDir, adSource, adCount, adsDir, language }
+      fields: { tmdbApiKey: tmdbKey, trailerSource, trailerCount, trailersDir, adSource, adCount, adsDir, language, adsLanguage }
     })
     markDone('content')
     setSection('output')
@@ -210,7 +238,10 @@
   $effect(() => {
     rpc.request.listLightsPlugins().then(plugins => {
       lightsPlugins = plugins
-      if (plugins.length === 1) selectedPluginId = plugins[0].id
+
+      if (plugins.length === 1) {
+        selectedPluginId = plugins[0].id
+      }
     })
   })
 
@@ -219,7 +250,11 @@
     hueError = null
     try {
       hueBridges = await rpc.request.discoverLightBridges({ pluginId: selectedPluginId })
-      if (hueBridges.length > 0) hueBridgeIp = hueBridges[0].ip
+
+      if (hueBridges.length > 0) {
+        hueBridgeIp = hueBridges[0].ip
+      }
+
       hueStep = 'bridge-select'
     } catch (e) {
       hueError = (e as Error).message
@@ -290,7 +325,7 @@
           class="step-btn"
           class:is-active={activeSection === s.id}
           class:is-done={state === 'done'}
-          disabled={state === 'pending'}
+          disabled={state === 'pending' && s.id !== 'lights'}
           onclick={() => setSection(s.id)}
         >
           <span class="step-num">
@@ -404,11 +439,15 @@
         {:else if playbackStep === 'done'}
           <SectionPanel label="Device Ready">
             <div class="success-row">
-              <StatusBadge state="done" label={selectedDevice?.name ?? 'Device paired'} />
+              <StatusBadge
+                state="done"
+                label={configuredTarget ? targetLabel(configuredTarget) : (selectedDevice?.name ?? 'Device paired')}
+              />
             </div>
           </SectionPanel>
           <div class="step-actions">
-            <Button variant="primary" onclick={advanceToContent}>Continue to Content</Button>
+            <Button variant="ghost" onclick={() => { playbackStep = 'method' }}>Change Device</Button>
+            <Button variant="primary" onclick={advanceToContent}>Continue</Button>
           </div>
         {/if}
       </div>
@@ -424,9 +463,10 @@
           <div class="field-row">
             <span class="field-label">Source</span>
             <ToggleSwitch
-              checked={trailerSource === 'local'}
-              label={trailerSource === 'local' ? 'Local folder' : 'Auto (TMDB)'}
-              onchange={(v) => { trailerSource = v ? 'local' : 'auto' }}
+              checked={trailerSource === 'auto'}
+              offLabel="Local folder"
+              label="Auto (TMDB)"
+              onchange={(v) => { trailerSource = v ? 'auto' : 'local' }}
             />
           </div>
 
@@ -445,15 +485,22 @@
                 </Button>
               </div>
               {#if tmdbValid === true}
-                <StatusBadge state="done" label="Key valid" />
+                <StatusBadge state="done" label="Key valid" variant="plain" />
               {:else if tmdbValid === false}
-                <StatusBadge state="fault" label="Invalid key" />
+                <StatusBadge state="fault" label="Invalid key" variant="plain" />
               {/if}
             </div>
 
             <div class="field-group">
               <label class="field-label-block">Language</label>
-              <TextInput bind:value={language} placeholder="en-US" hint="BCP-47 language tag for TMDB queries" />
+              <div class="lang-select-wrap">
+                <select class="lang-select" bind:value={language}>
+                  {#each TMDB_LANGUAGES as lang}
+                    <option value={lang.code}>{lang.label}</option>
+                  {/each}
+                </select>
+                <span class="lang-chevron"><ChevronDown size={14} /></span>
+              </div>
             </div>
           {:else}
             <div class="field-group">
@@ -472,13 +519,26 @@
           <div class="field-row">
             <span class="field-label">Source</span>
             <ToggleSwitch
-              checked={adSource === 'local'}
-              label={adSource === 'local' ? 'Local folder' : 'Auto'}
-              onchange={(v) => { adSource = v ? 'local' : 'auto' }}
+              checked={adSource === 'auto'}
+              offLabel="Local folder"
+              label="Auto"
+              onchange={(v) => { adSource = v ? 'auto' : 'local' }}
             />
           </div>
 
-          {#if adSource === 'local'}
+          {#if adSource === 'auto'}
+            <div class="field-group">
+              <label class="field-label-block">Language</label>
+              <div class="lang-select-wrap">
+                <select class="lang-select" bind:value={adsLanguage}>
+                  {#each ADS_LANGUAGES as lang}
+                    <option value={lang.code}>{lang.label}</option>
+                  {/each}
+                </select>
+                <span class="lang-chevron"><ChevronDown size={14} /></span>
+              </div>
+            </div>
+          {:else}
             <div class="field-group">
               <label class="field-label-block">Ads folder</label>
               <TextInput bind:value={adsDir} placeholder="/path/to/ads" hint="Absolute path to a folder of video files" />
@@ -909,9 +969,7 @@
   }
 
   .field-row--count {
-    border-top: 1px solid var(--border);
     margin-top: var(--u3);
-    padding-top: var(--u3);
   }
 
   .field-label {
@@ -953,6 +1011,38 @@
 
   .number-input:focus {
     border-color: var(--border-focus);
+  }
+
+  .lang-select {
+    width: 100%;
+    background: var(--bg-base);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-family: var(--font-mono);
+    padding: var(--u2) var(--u8) var(--u2) var(--u3);
+    appearance: none;
+    outline: none;
+  }
+
+  .lang-select:focus {
+    border-color: var(--amber-dim);
+  }
+
+  .lang-select-wrap {
+    position: relative;
+  }
+
+  .lang-chevron {
+    position: absolute;
+    right: var(--u3);
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    pointer-events: none;
+    display: flex;
+    align-items: center;
   }
 
   .light-list {

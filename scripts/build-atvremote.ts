@@ -16,7 +16,9 @@ async function main() {
     stdout: 'inherit',
     stderr: 'inherit'
   })
-  if (install.exitCode !== 0) throw new Error('pip install of pyatv failed')
+  if (install.exitCode !== 0) {
+    throw new Error('pip install of pyatv failed')
+  }
 
   const entryProc = Bun.spawnSync([
     'python',
@@ -55,12 +57,16 @@ async function main() {
     { stdout: 'inherit', stderr: 'inherit' }
   )
 
-  if (build.exitCode !== 0) throw new Error('PyInstaller build failed')
+  if (build.exitCode !== 0) {
+    throw new Error('PyInstaller build failed')
+  }
 
   const built = join(workDir, 'dist', IS_WIN ? 'atvremote.exe' : 'atvremote')
   const dest = join(VENDOR, 'atvremote')
   await copyFile(built, dest)
-  if (!IS_WIN) await chmod(dest, 0o755)
+  if (!IS_WIN) {
+    await chmod(dest, 0o755)
+  }
 
   await rm(workDir, { recursive: true, force: true })
 

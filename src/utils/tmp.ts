@@ -7,7 +7,9 @@ export function setActiveTmpDir(dir: string | null): void {
 }
 
 export async function cleanupTmpDir(): Promise<void> {
-  if (!activeTmpDir) return
+  if (!activeTmpDir) {
+    return
+  }
   const dir = activeTmpDir
   activeTmpDir = null
   try {

@@ -33,7 +33,9 @@ export class TrailerCache {
 
   async get(youtubeId: string): Promise<string | null> {
     const entry = this.index.entries.find(e => e.youtubeId === youtubeId)
-    if (!entry) return null
+    if (!entry) {
+      return null
+    }
     if (Date.now() - entry.cachedAt > TTL_MS) {
       await this.invalidate(youtubeId)
       return null
@@ -60,12 +62,18 @@ export class TrailerCache {
     const before = this.index.entries.length
     const valid: CacheEntry[] = []
     for (const entry of this.index.entries) {
-      if (Date.now() - entry.cachedAt > TTL_MS) continue
-      if (!(await Bun.file(entry.filePath).exists())) continue
+      if (Date.now() - entry.cachedAt > TTL_MS) {
+        continue
+      }
+      if (!(await Bun.file(entry.filePath).exists())) {
+        continue
+      }
       valid.push(entry)
     }
     this.index.entries = valid
-    if (valid.length !== before) await this.save()
+    if (valid.length !== before) {
+      await this.save()
+    }
     return before - valid.length
   }
 

@@ -78,17 +78,31 @@ export class LeaderboardAdService {
     await this.cache.init()
   }
 
-  async fetchAds(count: number): Promise<AdResult[]> {
+  async fetchAds(
+    count: number,
+    onItemStart?: (index: number, title: string) => void,
+    onItemProgress?: (percent: number) => void
+  ): Promise<AdResult[]> {
     const videos = await this.fetchLeaderboard()
     const results: AdResult[] = []
+    let skipped = 0
 
     for (const video of shuffle(videos)) {
-      if (results.length >= count) break
+      if (results.length >= count) {
+        break
+      }
+      if (skipped >= count) {
+        break
+      }
       try {
-        const result = await this.getOrDownload(video)
+        onItemStart?.(results.length, video.video_title)
+        const result = await this.getOrDownload(video, onItemProgress)
         results.push(result)
       } catch (err) {
-        console.warn(`Skipping ad "${video.video_title}": ${(err as Error).message}`)
+        skipped++
+        console.warn(
+          `Skipping ad "${video.video_title}": ${(err as Error).message.split('\n').slice(0, 6).join(' | ')}`
+        )
       }
     }
 
@@ -158,21 +172,24 @@ export class LeaderboardAdService {
     )
   }
 
-  private async getOrDownload(video: LeaderboardVideo): Promise<AdResult> {
+  private async getOrDownload(
+    video: LeaderboardVideo,
+    onProgress?: (percent: number) => void
+  ): Promise<AdResult> {
     const fileName = `${video.video_id}.mp4`
     const cached = await this.cache.get(video.video_id)
     if (cached) {
-      return { filePath: cached, fileName }
+      return { filePath: cached, fileName, title: video.video_title }
     }
 
     const outputPath = join(this.cache['cacheDir'], fileName)
-    await downloadVideo(video.video_id, outputPath)
+    await downloadVideo(video.video_id, outputPath, onProgress)
 
     if (!(await Bun.file(outputPath).exists())) {
       throw new Error('Download completed but output file not found')
     }
 
     await this.cache.set(video.video_id, outputPath)
-    return { filePath: outputPath, fileName }
+    return { filePath: outputPath, fileName, title: video.video_title }
   }
 }

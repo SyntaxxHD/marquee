@@ -45,6 +45,7 @@ Enforced by eslint + prettier — never deviate:
 - No trailing commas
 - Arrow functions omit parens for single arg: `x => x`
 - Print width 90, 2-space indent, LF
+- Always use braces for `if`/`else`/`for`/`while` — no one-liner control flow (enforced by lint)
 - Import ordering: builtin → external → internal → parent → sibling (blank line between groups, alphabetized within)
 - `import type` for type-only imports (enforced by lint)
 - No code comments unless the WHY is non-obvious — never explain what the code does
@@ -78,6 +79,14 @@ Existing: `hue`.
 | `src/mainview/`            | Svelte 5 UI — views, components, store, rpc       |
 | `electrobun.config.ts`     | Build configuration (icons, signing, copy rules)  |
 | `hutch.config.ts`          | Build pipeline steps                              |
+
+## Component reuse
+
+Before writing any UI markup or CSS, check `src/mainview/components/` for an existing component that covers the pattern. Existing components: `SectionPanel`, `Button`, `IconButton`, `ToggleSwitch`, `Spinner`, `ReadoutDisplay`, `ProgressTrack`, `CueRow`, `DeviceRow`, `LightFader`, `TextInput`, `RadioCard`, `StatusBadge`, `ModalDialog`.
+
+- Prefer extending a component with a new prop over duplicating its markup elsewhere
+- Extract a new component when the same structure appears (or would appear) in more than one place
+- Inline markup is acceptable only when a component abstraction would genuinely add no value (e.g. a one-off structural wrapper that will never recur)
 
 ## UI aesthetic
 

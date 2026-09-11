@@ -11,10 +11,17 @@ import {
   getLightsPluginFor
 } from '../lights/registry.ts'
 import { TmdbClient } from '../services/tmdb.ts'
-import { INITIAL_STATE } from '../shared/app-state.ts'
+import {
+  INITIAL_STATE,
+  ShowPhase,
+  CueStatus,
+  AppScreen,
+  CueMode
+} from '../shared/app-state.ts'
 import type { AppState } from '../shared/app-state.ts'
 import type { MarqueeRPC } from '../shared/rpc-schema.ts'
 import { MarqueeError } from '../utils/errors.ts'
+import { clearSession, loadSession, saveSession } from '../utils/session.ts'
 
 const DEV_SERVER_URL = 'http://localhost:5173'
 
@@ -22,6 +29,7 @@ let state: AppState = structuredClone(INITIAL_STATE)
 let win: BrowserWindow | null = null
 let confirmResolve: (() => void) | null = null
 let confirmReject: ((e: Error) => void) | null = null
+let restoredOutputPath: string | null = null
 
 function pushState() {
   win?.webview.rpc?.send.appStateUpdate(state)
@@ -40,15 +48,18 @@ async function initFromConfig() {
   const userConfig = await loadUserConfig()
 
   if (!userConfig) {
-    mutate({ screen: 'setup' })
+    mutate({ screen: AppScreen.Setup })
     return
   }
 
   const target = userConfig.streamTarget
   let deviceLabel = 'Not configured'
 
-  if (target?.type === 'appletv') deviceLabel = target.name
-  else if (target?.type === 'quicktime') deviceLabel = target.deviceName
+  if (target?.type === 'appletv') {
+    deviceLabel = target.name
+  } else if (target?.type === 'quicktime') {
+    deviceLabel = target.deviceName
+  }
 
   const lightsConfig = userConfig.lights
   const lightsLights = lightsConfig
@@ -69,12 +80,23 @@ async function initFromConfig() {
     const reachable = await backend.probe(target as never).catch(() => false)
     mutate({ device: { ...state.device, reachable } })
   }
+
+  const session = await loadSession()
+  if (session && !session.partial) {
+    restoredOutputPath = session.outputPath
+    mutate({ phase: ShowPhase.Ready, cues: session.cues, log: session.log })
+    appendLog('Previous build restored. Press GO to stream.')
+  } else if (session?.partial) {
+    mutate({ cues: session.cues, log: session.log, restoredPartial: true })
+    appendLog('Build was interrupted. Downloads are cached, resume will be fast.')
+  }
 }
 
-async function runShowSequence() {
+async function streamPrebuilt(outputPath: string): Promise<void> {
   const userConfig = await loadUserConfig()
-  if (!userConfig) throw new MarqueeError('No config. Run setup first.')
-  if (!userConfig.streamTarget) throw new MarqueeError('No playback device configured.')
+  if (!userConfig?.streamTarget) {
+    throw new MarqueeError('No playback device configured.')
+  }
 
   const lightsConfig = userConfig.lights
   const lightsPlugin = lightsConfig ? getLightsPluginFor(lightsConfig) : null
@@ -82,47 +104,22 @@ async function runShowSequence() {
   const lightIds = lightsConfig?.controlledLightIds ?? []
   const dimPercent = lightsConfig?.dimPercent ?? 30
 
-  mutate({ busy: true, error: null, phase: 'lights-on', cues: [] })
-
-  if (lightsClient) {
-    appendLog('Lights → bright')
-    await lightsClient.setNormal(lightIds)
-  }
-
-  mutate({ phase: 'building' })
-  appendLog('Building pre-show…')
-
-  const { outputPath, cues } = await runBuild()
-  mutate({
-    cues: cues.map((c, i) => ({
-      id: String(i),
-      label: c.label,
-      durationMs: c.durationMs ?? null,
-      status: 'pending'
-    }))
-  })
-
-  if (state.cueMode === 'manual') {
-    mutate({ phase: 'ready' })
-    appendLog('Pre-show ready. Waiting for GO…')
-    await waitForConfirm()
-  }
-
-  mutate({ phase: 'lights-dimming' })
+  mutate({ phase: ShowPhase.LightsDimming })
 
   if (lightsClient) {
     appendLog(`Lights → dim (${dimPercent}%)`)
     await lightsClient.dim(lightIds, dimPercent)
   }
 
-  mutate({ phase: 'playing', screen: 'now-playing' })
+  mutate({ phase: ShowPhase.Playing, screen: AppScreen.NowPlaying })
   appendLog('Playback started')
 
   const backend = getBackend(userConfig.streamTarget.type)
   try {
     await backend.play(outputPath, userConfig.streamTarget as never)
   } finally {
-    mutate({ phase: 'lights-off', screen: 'control-room' })
+    await clearSession()
+    mutate({ phase: ShowPhase.LightsOff, screen: AppScreen.ControlRoom })
 
     if (lightsClient) {
       appendLog('Lights → off')
@@ -130,13 +127,72 @@ async function runShowSequence() {
     }
 
     mutate({
-      phase: 'done',
+      phase: ShowPhase.Done,
       busy: false,
-      cues: state.cues.map(c => ({ ...c, status: 'done' }))
+      cues: state.cues.map(c => ({ ...c, status: CueStatus.Done }))
     })
 
-    setTimeout(() => mutate({ phase: 'idle', cues: [] }), 3000)
+    setTimeout(() => mutate({ phase: ShowPhase.Idle, cues: [] }), 3000)
   }
+}
+
+async function runShowSequence() {
+  const userConfig = await loadUserConfig()
+  if (!userConfig) {
+    throw new MarqueeError('No config. Run setup first.')
+  }
+  if (!userConfig.streamTarget) {
+    throw new MarqueeError('No playback device configured.')
+  }
+
+  const lightsConfig = userConfig.lights
+  const lightsPlugin = lightsConfig ? getLightsPluginFor(lightsConfig) : null
+  const lightsClient = lightsPlugin ? lightsPlugin.createClient(lightsConfig!) : null
+  const lightIds = lightsConfig?.controlledLightIds ?? []
+
+  mutate({ busy: true, error: null, phase: ShowPhase.LightsOn, cues: [] })
+
+  if (lightsClient) {
+    appendLog('Lights → bright')
+    await lightsClient.setNormal(lightIds)
+  }
+
+  mutate({ phase: ShowPhase.Building })
+  appendLog('Building pre-show…')
+
+  const { outputPath, cues } = await runBuild({
+    onLog: message => appendLog(message),
+    onProgress: progress => mutate({ buildProgress: progress }),
+    onDownloadsComplete: async partialCues => {
+      const mapped = partialCues.map((c, i) => ({
+        id: String(i),
+        label: c.label,
+        durationMs: c.durationMs ?? null,
+        status: CueStatus.Pending
+      }))
+
+      mutate({ cues: mapped })
+      await saveSession({ partial: true, outputPath: '', cues: mapped, log: state.log })
+    }
+  })
+
+  const mappedCues = cues.map((c, i) => ({
+    id: String(i),
+    label: c.label,
+    durationMs: c.durationMs ?? null,
+    status: CueStatus.Pending
+  }))
+
+  mutate({ buildProgress: null, cues: mappedCues })
+  await saveSession({ partial: false, outputPath, cues: mappedCues, log: state.log })
+
+  if (state.cueMode === CueMode.Manual) {
+    mutate({ phase: ShowPhase.Ready })
+    appendLog('Pre-show ready. Waiting for GO…')
+    await waitForConfirm()
+  }
+
+  await streamPrebuilt(outputPath)
 }
 
 function waitForConfirm(): Promise<void> {
@@ -188,46 +244,106 @@ const rpc = defineElectrobunRPC<MarqueeRPC>('bun', {
       },
 
       startShow: async () => {
-        if (state.busy) return
+        if (state.busy && state.phase !== ShowPhase.Ready) {
+          return
+        }
+
+        if (state.phase === ShowPhase.Ready) {
+          confirmReject?.(new MarqueeError('Cancelled'))
+          confirmResolve = null
+          confirmReject = null
+          mutate({ busy: false, phase: ShowPhase.Idle, restoredPartial: false })
+        }
+
+        restoredOutputPath = null
+        mutate({ restoredPartial: false })
+        await clearSession()
+
         runShowSequence().catch(e => {
-          mutate({ busy: false, error: (e as Error).message, phase: 'error' })
+          if ((e as Error).message === 'Cancelled') {
+            return
+          }
+
+          mutate({ busy: false, error: (e as Error).message, phase: ShowPhase.Error })
         })
       },
 
       confirmStart: async () => {
-        confirmResolve?.()
-        confirmResolve = null
-        confirmReject = null
+        if (confirmResolve) {
+          confirmResolve()
+          confirmResolve = null
+          confirmReject = null
+        } else if (restoredOutputPath) {
+          const outputPath = restoredOutputPath
+          restoredOutputPath = null
+
+          mutate({ busy: true })
+          streamPrebuilt(outputPath).catch(e => {
+            mutate({ busy: false, error: (e as Error).message, phase: ShowPhase.Error })
+          })
+        }
       },
 
       cancelShow: async () => {
         confirmReject?.(new MarqueeError('Cancelled'))
         confirmResolve = null
         confirmReject = null
+        restoredOutputPath = null
+        mutate({
+          busy: false,
+          phase: ShowPhase.Idle,
+          screen: AppScreen.ControlRoom,
+          restoredPartial: false
+        })
+      },
 
-        mutate({ busy: false, phase: 'idle', screen: 'control-room' })
+      clearCues: async () => {
+        const clearable =
+          state.phase === ShowPhase.Idle ||
+          state.phase === ShowPhase.Ready ||
+          state.phase === ShowPhase.Done ||
+          state.phase === ShowPhase.Error
+        if (!clearable) {
+          return
+        }
+
+        if (state.phase === ShowPhase.Ready) {
+          confirmReject?.(new MarqueeError('Cancelled'))
+          confirmResolve = null
+          confirmReject = null
+        }
+
+        restoredOutputPath = null
+        await clearSession()
+        mutate({ cues: [], phase: ShowPhase.Idle, error: null, restoredPartial: false })
       },
 
       streamFile: async ({ filePath }) => {
-        if (state.busy) return
+        if (state.busy) {
+          return
+        }
 
         const userConfig = await loadUserConfig()
-        if (!userConfig?.streamTarget) return
+        if (!userConfig?.streamTarget) {
+          return
+        }
 
-        mutate({ busy: true, phase: 'playing', screen: 'now-playing' })
+        mutate({ busy: true, phase: ShowPhase.Playing, screen: AppScreen.NowPlaying })
 
         const backend = getBackend(userConfig.streamTarget.type)
 
         try {
           await backend.play(filePath, userConfig.streamTarget as never)
         } finally {
-          mutate({ busy: false, phase: 'idle', screen: 'control-room' })
+          mutate({ busy: false, phase: ShowPhase.Idle, screen: AppScreen.ControlRoom })
         }
       },
 
       setLightLevel: async ({ lightId, level }) => {
         const userConfig = await loadUserConfig()
-        if (!userConfig?.lights) return
+        if (!userConfig?.lights) {
+          return
+        }
 
         const client = getLightsPluginFor(userConfig.lights).createClient(
           userConfig.lights
@@ -319,7 +435,11 @@ tray.setMenu([
 ])
 
 tray.on('tray-clicked', e => {
-  if (e.data.action === 'show') win?.show()
+  if (e.data.action === 'show') {
+    win?.show()
+  }
 
-  if (e.data.action === 'quit') Utils.quit()
+  if (e.data.action === 'quit') {
+    Utils.quit()
+  }
 })

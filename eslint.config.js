@@ -36,6 +36,11 @@ export default tseslint.config(
   },
   eslintConfigPrettier,
   {
+    rules: {
+      curly: ['error', 'all']
+    }
+  },
+  {
     ignores: [
       'eslint.config.js',
       'prettier.config.js',

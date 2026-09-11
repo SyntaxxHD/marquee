@@ -12,7 +12,9 @@ export function listLightsPlugins() {
 
 export function getLightsPlugin(id: string): LightsPlugin<LightsConfig> {
   const plugin = registry.get(id)
-  if (!plugin) throw new MarqueeError(`Unknown lights plugin: ${id}`)
+  if (!plugin) {
+    throw new MarqueeError(`Unknown lights plugin: ${id}`)
+  }
   return plugin
 }
 

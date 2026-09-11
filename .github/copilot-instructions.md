@@ -4,7 +4,7 @@ Cinema pre-show assembler. Streams ads/trailers to Apple TV via AirPlay, dims Ph
 
 ## Code style
 
-No semicolons. Single quotes. No trailing commas. Arrow parens omitted for single arg: `x => x`. Print width 90, 2-space indent. Import ordering enforced (builtin → external → internal → parent → sibling, blank lines between groups). Use `import type` for type-only imports. No code comments unless the WHY is non-obvious.
+No semicolons. Single quotes. No trailing commas. Arrow parens omitted for single arg: `x => x`. Print width 90, 2-space indent. Always use braces for `if`/`else`/`for`/`while` — no one-liner control flow. Import ordering enforced (builtin → external → internal → parent → sibling, blank lines between groups). Use `import type` for type-only imports. No code comments unless the WHY is non-obvious.
 
 ## Pre-commit gates (all must pass)
 

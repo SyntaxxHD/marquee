@@ -43,7 +43,9 @@ export function serveFile(filePath: string, targetIp: string): ServedFile {
     port,
     fetch(req) {
       const url = new URL(req.url)
-      if (url.pathname !== '/video.mp4') return new Response('Not found', { status: 404 })
+      if (url.pathname !== '/video.mp4') {
+        return new Response('Not found', { status: 404 })
+      }
 
       const rangeHeader = req.headers.get('range')
       const baseHeaders = {

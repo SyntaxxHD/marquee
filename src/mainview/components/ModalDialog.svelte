@@ -10,7 +10,9 @@
   let { open = false, title, onclose, children, actions }: Props = $props()
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') onclose?.()
+    if (e.key === 'Escape') {
+      onclose?.()
+    }
   }
 </script>
 

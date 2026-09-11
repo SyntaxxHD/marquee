@@ -4,6 +4,7 @@
   interface Props {
     state?: State
     label: string
+    variant?: 'default' | 'plain'
   }
 
   const STATE_COLORS: Record<State, string> = {
@@ -13,10 +14,10 @@
     fault: 'var(--status-fault)'
   }
 
-  let { state = 'idle', label }: Props = $props()
+  let { state = 'idle', label, variant = 'default' }: Props = $props()
 </script>
 
-<span class="badge" style="--dot: {STATE_COLORS[state]}">
+<span class="badge" class:plain={variant === 'plain'} style="--dot: {STATE_COLORS[state]}">
   <span class="dot"></span>
   {label}
 </span>
@@ -35,6 +36,12 @@
     color: var(--text-secondary);
     background: var(--bg-surface);
     white-space: nowrap;
+  }
+
+  .badge.plain {
+    border: none;
+    background: none;
+    padding: 0;
   }
 
   .dot {

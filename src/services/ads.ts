@@ -8,6 +8,7 @@ const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.mkv', '.avi'])
 export interface AdResult {
   filePath: string
   fileName: string
+  title: string
 }
 
 export async function pickLocalVideos(
@@ -35,7 +36,11 @@ export async function pickLocalVideos(
   const picked: AdResult[] = []
   for (let i = 0; i < count; i++) {
     const fileName = shuffled[i % shuffled.length]
-    picked.push({ filePath: join(dir, fileName), fileName })
+    const title = fileName.slice(
+      0,
+      fileName.lastIndexOf('.') > 0 ? fileName.lastIndexOf('.') : undefined
+    )
+    picked.push({ filePath: join(dir, fileName), fileName, title })
   }
   return picked
 }

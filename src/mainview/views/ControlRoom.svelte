@@ -1,8 +1,9 @@
 <script lang="ts">
   import { get } from 'svelte/store'
-  import { Play, Square, Upload, Settings } from 'lucide-svelte'
+  import { Play, Square, Trash2, Upload, Settings } from 'lucide-svelte'
   import { rpc } from '../rpc.ts'
   import { appState } from '../store.ts'
+  import { ShowPhase, CueMode, AppScreen } from '$shared/app-state.ts'
   import Button from '../components/Button.svelte'
   import IconButton from '../components/IconButton.svelte'
   import SectionPanel from '../components/SectionPanel.svelte'
@@ -12,14 +13,16 @@
   import ToggleSwitch from '../components/ToggleSwitch.svelte'
   import Spinner from '../components/Spinner.svelte'
   import ReadoutDisplay from '../components/ReadoutDisplay.svelte'
+  import ProgressTrack from '../components/ProgressTrack.svelte'
   import logo from '../assets/logo.svg'
 
   let state = $derived($appState)
   let busy = $derived(state.busy)
   let cueMode = $derived(state.cueMode)
   let phase = $derived(state.phase)
+  let restoredPartial = $derived(state.restoredPartial)
 
-  let showPendingConfirm = $derived(phase === 'ready' && cueMode === 'manual')
+  let showPendingConfirm = $derived(phase === ShowPhase.Ready)
 
   async function handleStartShow() {
     await rpc.request.startShow()
@@ -33,12 +36,16 @@
     await rpc.request.cancelShow()
   }
 
+  async function handleClearCues() {
+    await rpc.request.clearCues()
+  }
+
   async function handleStreamFile() {
     await rpc.request.streamFile({ filePath: '' })
   }
 
-  async function handleCueModeChange(manual: boolean) {
-    await rpc.request.saveCueMode({ mode: manual ? 'manual' : 'auto' })
+  async function handleCueModeChange(autoStart: boolean) {
+    await rpc.request.saveCueMode({ mode: autoStart ? CueMode.Auto : CueMode.Manual })
   }
 
   async function handleLightLevel(lightId: string, level: number) {
@@ -46,20 +53,27 @@
   }
 
   async function handleSetup() {
-    await rpc.request.navigateTo({ screen: 'setup' })
+    await rpc.request.navigateTo({ screen: AppScreen.Setup })
   }
 
+  let logEl: HTMLDivElement | undefined
+
+  $effect(() => {
+    state.log
+    logEl?.scrollTo({ top: logEl.scrollHeight })
+  })
+
   function phaseLabel(p: typeof phase): string {
-    const labels: Record<typeof phase, string> = {
-      idle: 'Idle',
-      'lights-on': 'Lights On',
-      building: 'Building Pre-show',
-      ready: 'Ready',
-      'lights-dimming': 'Dimming Lights',
-      playing: 'Playing',
-      'lights-off': 'Lights Off',
-      done: 'Done',
-      error: 'Error'
+    const labels: Record<ShowPhase, string> = {
+      [ShowPhase.Idle]: 'Idle',
+      [ShowPhase.LightsOn]: 'Lights On',
+      [ShowPhase.Building]: 'Building Pre-show',
+      [ShowPhase.Ready]: 'Ready',
+      [ShowPhase.LightsDimming]: 'Dimming Lights',
+      [ShowPhase.Playing]: 'Playing',
+      [ShowPhase.LightsOff]: 'Lights Off',
+      [ShowPhase.Done]: 'Done',
+      [ShowPhase.Error]: 'Error'
     }
     return labels[p] ?? p
   }
@@ -74,11 +88,16 @@
     <SectionPanel label="Programme">
       <div class="programme-toolbar">
         <ToggleSwitch
-          checked={cueMode === 'manual'}
-          label="Manual GO"
+          checked={cueMode === CueMode.Auto}
+          label="Auto-start"
           onchange={handleCueModeChange}
         />
-        <ReadoutDisplay label="Phase" value={phaseLabel(phase)} mono={false} />
+        <div class="toolbar-right">
+          {#if state.cues.length > 0 && (phase === ShowPhase.Idle || phase === ShowPhase.Ready || phase === ShowPhase.Done || phase === ShowPhase.Error)}
+            <IconButton icon={Trash2} label="Clear programme" onclick={handleClearCues} />
+          {/if}
+          <ReadoutDisplay label="Phase" value={phaseLabel(phase)} mono={false} />
+        </div>
       </div>
 
       <div class="cue-list">
@@ -92,62 +111,82 @@
 
       {#if showPendingConfirm}
         <div class="go-bar">
-          <button class="go-btn" onclick={handleConfirmGo}>GO</button>
+          <button class="go-btn" onclick={handleConfirmGo}>START</button>
         </div>
       {/if}
     </SectionPanel>
   </div>
 
   <div class="col col--right">
-    <SectionPanel label="House Lights">
-      <div class="lights">
-        {#each state.lights.lights as light (light.id)}
-          <LightFader
-            label={light.name}
-            value={light.level}
-            onchange={(v) => handleLightLevel(light.id, v)}
-          />
-        {/each}
-        {#if !state.lights.configured}
-          <p class="empty-state">Lights not configured.</p>
-        {/if}
-      </div>
-    </SectionPanel>
+    <div class="right-top">
+      <SectionPanel label="House Lights">
+        <div class="lights">
+          {#each state.lights.lights as light (light.id)}
+            <LightFader
+              label={light.name}
+              value={light.level}
+              onchange={(v) => handleLightLevel(light.id, v)}
+            />
+          {/each}
+          {#if !state.lights.configured}
+            <p class="empty-state">Lights not configured.</p>
+          {/if}
+        </div>
+      </SectionPanel>
 
-    <SectionPanel label="Playback">
-      <DeviceRow device={state.device} />
+      <SectionPanel label="Playback">
+        <DeviceRow device={state.device} />
 
-      <div class="playback-actions">
-        {#if busy}
-          <div class="busy-row">
-            <Spinner />
-            <span class="busy-label">{phaseLabel(phase)}</span>
-            {#if phase !== 'idle'}
+        <div class="playback-actions">
+          {#if busy && phase !== ShowPhase.Ready}
+            <div class="busy-row">
+              <Spinner />
+              <span class="busy-label">{phaseLabel(phase)}</span>
               <Button variant="danger" onclick={handleCancelShow}>Abort</Button>
+            </div>
+          {:else}
+            {#if restoredPartial}
+              <Button variant="primary" onclick={handleStartShow}>Resume Build</Button>
+            {:else}
+              <Button variant="primary" disabled={!state.device.config} onclick={handleStartShow}>
+                Assemble Pre-show
+              </Button>
             {/if}
-          </div>
-        {:else}
-          <Button variant="primary" disabled={!state.device.config} onclick={handleStartShow}>
-            Assemble Pre-show
-          </Button>
-          <IconButton icon={Upload} label="Stream file" onclick={handleStreamFile} />
-          <IconButton icon={Settings} label="Change device" onclick={handleSetup} />
-        {/if}
-      </div>
+            <IconButton icon={Upload} label="Stream file" onclick={handleStreamFile} />
+            <IconButton icon={Settings} label="Change device" onclick={handleSetup} />
+          {/if}
+        </div>
 
-      {#if state.error}
-        <p class="error-msg">{state.error}</p>
+        {#if state.error}
+          <p class="error-msg">{state.error}</p>
+        {/if}
+      </SectionPanel>
+
+      {#if state.buildProgress}
+        <SectionPanel label="Progress">
+          <div class="build-progress">
+            <div class="progress-item">
+              <span class="progress-label">{state.buildProgress.label}</span>
+              <ProgressTrack value={state.buildProgress.itemPercent} max={100} />
+            </div>
+            <div class="progress-item">
+              <span class="progress-label">Total: {state.buildProgress.itemIndex + 1} / {state.buildProgress.itemTotal}</span>
+              <ProgressTrack value={state.buildProgress.itemIndex + 1} max={state.buildProgress.itemTotal} />
+            </div>
+          </div>
+        </SectionPanel>
       {/if}
-    </SectionPanel>
+    </div>
 
     {#if state.log.length > 0}
-      <SectionPanel label="Log">
-        <div class="log">
+      <div class="log-panel">
+        <div class="log-header"><span class="log-label">LOG</span></div>
+        <div class="log" bind:this={logEl}>
           {#each state.log as line}
             <div class="log-line">{line}</div>
           {/each}
         </div>
-      </SectionPanel>
+      </div>
     {/if}
   </div>
   </div>
@@ -177,6 +216,7 @@
   .panels {
     display: grid;
     grid-template-columns: 1fr 320px;
+    grid-template-rows: 1fr;
     gap: var(--u4);
     flex: 1;
     min-height: 0;
@@ -212,6 +252,12 @@
     flex-shrink: 0;
   }
 
+  .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: var(--u2);
+  }
+
   .cue-list {
     flex: 1;
     overflow-y: auto;
@@ -240,7 +286,6 @@
     border-radius: var(--radius);
     font-size: 16px;
     font-weight: 700;
-    letter-spacing: 0.18em;
     color: #080909;
     cursor: pointer;
     transition: background var(--transition-fast);
@@ -288,13 +333,71 @@
     font-family: var(--font-mono);
   }
 
-  .log {
+  .build-progress {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    max-height: 120px;
+    gap: var(--u3);
+  }
+
+  .progress-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .progress-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  :global(.log-panel) {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .right-top {
+    display: flex;
+    flex-direction: column;
+    gap: var(--u4);
+    flex-shrink: 0;
+  }
+
+  .log-panel {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-surface);
+    overflow: hidden;
+  }
+
+  .log-header {
+    padding: var(--u2) var(--u4);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-raised);
+    flex-shrink: 0;
+  }
+
+  .log-label {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .log {
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
+    padding: var(--u4);
     scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
   }
 
   .log-line {
@@ -304,5 +407,6 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    line-height: 1.6;
   }
 </style>

@@ -25,7 +25,7 @@
   --border-focus: #d4930a;
 
   --font-sans: 'Inter', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Mono', monospace;
+  --font-mono: var(--font-sans);
 
   --radius: 2px;
 

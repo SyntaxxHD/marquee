@@ -3,7 +3,7 @@ import type { DiscoveredDevice } from '../backends/types.ts'
 import type { UserConfig } from '../config.ts'
 import type { LightInfo, DiscoveredBridge } from '../lights/types.ts'
 
-import type { AppState, ShowPhase } from './app-state.ts'
+import type { AppState, ShowPhase, CueMode } from './app-state.ts'
 
 export type { DiscoveredDevice, LightInfo, DiscoveredBridge }
 export type BackendInfo = { id: string; label: string }
@@ -21,10 +21,11 @@ export type MarqueeRPC = {
       }
       probeDevice: { params: { config: StreamTargetConfig }; response: boolean }
       loadConfig: { params: undefined; response: AppState }
-      saveCueMode: { params: { mode: 'auto' | 'manual' }; response: void }
+      saveCueMode: { params: { mode: CueMode }; response: void }
       startShow: { params: undefined; response: void }
       confirmStart: { params: undefined; response: void }
       cancelShow: { params: undefined; response: void }
+      clearCues: { params: undefined; response: void }
       streamFile: { params: { filePath: string }; response: void }
       setLightLevel: { params: { lightId: string; level: number }; response: void }
       navigateTo: { params: { screen: AppState['screen'] }; response: void }

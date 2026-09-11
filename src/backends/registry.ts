@@ -15,7 +15,9 @@ export function listBackends(): Array<{ id: string; label: string }> {
 
 export function getBackend(id: string): StreamingBackend<StreamTargetConfig> {
   const backend = BACKENDS.get(id)
-  if (!backend) throw new MarqueeError(`Unknown streaming backend: "${id}"`)
+  if (!backend) {
+    throw new MarqueeError(`Unknown streaming backend: "${id}"`)
+  }
   return backend
 }
 

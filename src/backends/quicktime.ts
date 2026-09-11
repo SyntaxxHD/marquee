@@ -7,7 +7,9 @@ export const quickTimeBackend: StreamingBackend<QuickTimeConfig> = {
   label: 'QuickTime (macOS AirPlay)',
 
   async discover() {
-    if (process.platform !== 'darwin') return []
+    if (process.platform !== 'darwin') {
+      return []
+    }
     const names = await listAirPlayDevices()
     return names.map(name => ({ id: name, name, detail: 'macOS AirPlay' }))
   },

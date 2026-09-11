@@ -1,5 +1,5 @@
-import { mkdir, unlink, writeFile } from 'fs/promises'
-import { join } from 'path'
+import { mkdir, writeFile } from 'fs/promises'
+import { basename, extname, join } from 'path'
 
 import ffmpeg from 'fluent-ffmpeg'
 
@@ -12,8 +12,11 @@ export interface AssembleInput {
   files: string[]
   tmpDir: string
   outputDir: string
+  normCacheDir: string
   resolution: OutputResolution
   fps: OutputFps
+  onSegmentStart?: (index: number, total: number) => void
+  onSegmentProgress?: (percent: number) => void
 }
 
 export interface AssembleResult {
@@ -30,7 +33,9 @@ interface VideoEncoder {
 let cachedEncoder: VideoEncoder | null = null
 
 async function pickVideoEncoder(ffmpegPath: string): Promise<VideoEncoder> {
-  if (cachedEncoder) return cachedEncoder
+  if (cachedEncoder) {
+    return cachedEncoder
+  }
 
   const result = await exec([ffmpegPath, '-hide_banner', '-encoders'], {
     captureOutput: true,
@@ -56,7 +61,8 @@ function normalizeSegment(
   width: number,
   height: number,
   fps: OutputFps,
-  encoder: VideoEncoder
+  encoder: VideoEncoder,
+  onProgress?: (percent: number) => void
 ): Promise<void> {
   const is4K = width >= 3840
   return new Promise((resolve, reject) => {
@@ -84,6 +90,7 @@ function normalizeSegment(
       .audioChannels(2)
       .addOutputOption('-movflags +faststart')
       .output(output)
+      .on('progress', ({ percent }: { percent?: number }) => onProgress?.(percent ?? 0))
       .on('end', () => resolve())
       .on('error', (err: Error) =>
         reject(new MarqueeError(`ffmpeg normalize failed: ${err.message}`))
@@ -95,6 +102,7 @@ function normalizeSegment(
 export async function assemblePreshow(input: AssembleInput): Promise<AssembleResult> {
   await mkdir(input.tmpDir, { recursive: true })
   await mkdir(input.outputDir, { recursive: true })
+  await mkdir(input.normCacheDir, { recursive: true })
 
   const bins = await resolveBinaries()
   ffmpeg.setFfmpegPath(bins.ffmpeg)
@@ -107,9 +115,27 @@ export async function assemblePreshow(input: AssembleInput): Promise<AssembleRes
 
   for (let i = 0; i < total; i++) {
     const file = input.files[i]
-    const outPath = join(input.tmpDir, `normalized-${i}.mp4`)
-    await normalizeSegment(file, outPath, width, height, input.fps, encoder)
-    normalized.push(outPath)
+    const key = `${basename(file, extname(file))}_${Bun.hash(`${file}|${width}x${height}|${input.fps}|${encoder.codec}`).toString(16)}`
+    const cachedPath = join(input.normCacheDir, `${key}.mp4`)
+    input.onSegmentStart?.(i, total)
+
+    if (await Bun.file(cachedPath).exists()) {
+      input.onSegmentProgress?.(100)
+      normalized.push(cachedPath)
+      continue
+    }
+
+    await normalizeSegment(
+      file,
+      cachedPath,
+      width,
+      height,
+      input.fps,
+      encoder,
+      input.onSegmentProgress
+    )
+
+    normalized.push(cachedPath)
   }
 
   const concatList = normalized.map(f => `file '${f.replace(/'/g, "'\\''")}'`).join('\n')
@@ -130,10 +156,6 @@ export async function assemblePreshow(input: AssembleInput): Promise<AssembleRes
       )
       .run()
   })
-
-  for (const f of normalized) {
-    await unlink(f).catch(() => {})
-  }
 
   return { outputPath }
 }

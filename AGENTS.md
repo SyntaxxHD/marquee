@@ -45,6 +45,7 @@ Enforced by eslint + prettier — never deviate:
 - No trailing commas
 - Arrow functions omit parens for single arg: `x => x`
 - Print width 90, 2-space indent, LF
+- Always use braces for `if`/`else`/`for`/`while` — no one-liner control flow (enforced by lint)
 - Import ordering: builtin → external → internal → parent → sibling (blank line between groups, alphabetized within)
 - `import type` for type-only imports (enforced by lint)
 - No code comments unless the WHY is non-obvious — never explain what the code does

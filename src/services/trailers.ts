@@ -26,18 +26,27 @@ export class TrailerService {
     await this.cache.init()
   }
 
-  async fetchTrailers(count: number): Promise<TrailerResult[]> {
+  async fetchTrailers(
+    count: number,
+    onItemStart?: (index: number, title: string) => void,
+    onItemProgress?: (percent: number) => void
+  ): Promise<TrailerResult[]> {
     const movies = await this.tmdb.getTrendingMovies()
     const results: TrailerResult[] = []
 
     for (const movie of movies) {
-      if (results.length >= count) break
+      if (results.length >= count) {
+        break
+      }
 
       const youtubeId = await this.tmdb.getTrailerKey(movie.id)
-      if (!youtubeId) continue
+      if (!youtubeId) {
+        continue
+      }
 
       try {
-        const result = await this.getOrDownload(youtubeId, movie.title)
+        onItemStart?.(results.length, movie.title)
+        const result = await this.getOrDownload(youtubeId, movie.title, onItemProgress)
         results.push(result)
       } catch (err) {
         console.warn(`Skipping "${movie.title}": ${(err as Error).message}`)
@@ -53,14 +62,18 @@ export class TrailerService {
     return results
   }
 
-  private async getOrDownload(youtubeId: string, title: string): Promise<TrailerResult> {
+  private async getOrDownload(
+    youtubeId: string,
+    title: string,
+    onProgress?: (percent: number) => void
+  ): Promise<TrailerResult> {
     const cached = await this.cache.get(youtubeId)
     if (cached) {
       return { youtubeId, filePath: cached, title, fromCache: true }
     }
 
     const outputPath = join(this.cache['cacheDir'], `${youtubeId}.mp4`)
-    await downloadVideo(youtubeId, outputPath)
+    await downloadVideo(youtubeId, outputPath, onProgress)
 
     if (!(await Bun.file(outputPath).exists())) {
       throw new Error('Download completed but output file not found')

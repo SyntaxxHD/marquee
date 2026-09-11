@@ -1,17 +1,41 @@
 import type { StreamTargetConfig } from '../backends/types.ts'
 
-export type ShowPhase =
-  | 'idle'
-  | 'lights-on'
-  | 'building'
-  | 'ready'
-  | 'lights-dimming'
-  | 'playing'
-  | 'lights-off'
-  | 'done'
-  | 'error'
+export enum ShowPhase {
+  Idle = 'idle',
+  LightsOn = 'lights-on',
+  Building = 'building',
+  Ready = 'ready',
+  LightsDimming = 'lights-dimming',
+  Playing = 'playing',
+  LightsOff = 'lights-off',
+  Done = 'done',
+  Error = 'error'
+}
 
-export type CueStatus = 'pending' | 'active' | 'done' | 'error'
+export enum CueStatus {
+  Pending = 'pending',
+  Active = 'active',
+  Done = 'done',
+  Error = 'error'
+}
+
+export enum AppScreen {
+  Setup = 'setup',
+  ControlRoom = 'control-room',
+  NowPlaying = 'now-playing'
+}
+
+export enum CueMode {
+  Auto = 'auto',
+  Manual = 'manual'
+}
+
+export interface BuildProgress {
+  label: string
+  itemIndex: number
+  itemTotal: number
+  itemPercent: number
+}
 
 export interface CueItem {
   id: string
@@ -45,27 +69,31 @@ export interface PlaybackStatus {
 }
 
 export interface AppState {
-  screen: 'setup' | 'control-room' | 'now-playing'
+  screen: AppScreen
   phase: ShowPhase
-  cueMode: 'auto' | 'manual'
+  cueMode: CueMode
   cues: CueItem[]
   device: DeviceStatus
   lights: LightsStatus
   playback: PlaybackStatus
   busy: boolean
   log: string[]
+  buildProgress: BuildProgress | null
   error: string | null
+  restoredPartial: boolean
 }
 
 export const INITIAL_STATE: AppState = {
-  screen: 'control-room',
-  phase: 'idle',
-  cueMode: 'auto',
+  screen: AppScreen.ControlRoom,
+  phase: ShowPhase.Idle,
+  cueMode: CueMode.Manual,
   cues: [],
   device: { config: null, reachable: null, label: 'Not configured' },
   lights: { pluginId: null, configured: false, lights: [] },
   playback: { elapsedMs: 0, durationMs: null, cueName: null },
   busy: false,
   log: [],
-  error: null
+  buildProgress: null,
+  error: null,
+  restoredPartial: false
 }

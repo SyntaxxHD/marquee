@@ -3,7 +3,7 @@ export default {
     prepare: 'hutch electrobun prepare',
     'ui:build': 'hutch pm exec -- vite build',
     'ui:dev': 'hutch electrobun prepare && hutch pm exec -- vite --port 5173',
-    dev: 'hutch electrobun prepare && hutch pm exec -- vite build && hutch electrobun dev --watch',
+    dev: 'hutch electrobun prepare && hutch pm exec -- vite build && hutch pm exec -- concurrently "vite build --watch" "hutch electrobun dev --watch"',
     'dev:hmr': [
       'hutch',
       'pm',

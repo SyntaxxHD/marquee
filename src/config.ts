@@ -22,6 +22,7 @@ export interface UserConfig {
   trailerCount: number
   streamTarget: StreamTargetConfig | null
   language: string
+  adsLanguage: string
   outputResolution: OutputResolution
   outputFps: OutputFps
   lights: LightsConfig | null
@@ -39,6 +40,7 @@ export interface Config {
   adsCacheDir: string
   streamTarget: StreamTargetConfig | null
   language: string
+  adsLanguage: string
   outputResolution: OutputResolution
   outputFps: OutputFps
   lights: LightsConfig | null
@@ -50,13 +52,16 @@ export const CONFIG_DIR = paths.config
 export const CACHE_DIR = join(paths.cache, 'trailers')
 export const ADS_CACHE_DIR = join(paths.cache, 'ads')
 export const OUTPUT_DIR = join(paths.cache, 'output')
+export const NORM_CACHE_DIR = join(paths.cache, 'normalized')
 export const BIN_CACHE_DIR = join(paths.cache, 'bin')
 const USER_CONFIG_PATH = join(paths.config, 'config.json')
 export const PYATV_STORAGE_FILE = join(paths.config, 'pyatv.json')
 
 export async function loadUserConfig(): Promise<UserConfig | null> {
   const file = Bun.file(USER_CONFIG_PATH)
-  if (!(await file.exists())) return null
+  if (!(await file.exists())) {
+    return null
+  }
   const raw = (await file.json()) as Record<string, unknown>
 
   if (raw.streamTarget === undefined && raw.appleTV) {
@@ -125,7 +130,8 @@ export async function loadConfig(): Promise<Config> {
     cacheDir: CACHE_DIR,
     adsCacheDir: ADS_CACHE_DIR,
     streamTarget: userConfig.streamTarget,
-    language: userConfig.language ?? 'de-DE',
+    language: userConfig.language ?? 'en-US',
+    adsLanguage: userConfig.adsLanguage ?? 'en-US',
     outputResolution: userConfig.outputResolution,
     outputFps: userConfig.outputFps,
     lights: userConfig.lights ?? null

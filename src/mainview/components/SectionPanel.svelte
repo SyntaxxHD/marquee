@@ -1,13 +1,14 @@
 <script lang="ts">
   interface Props {
     label?: string
+    class?: string
     children?: import('svelte').Snippet
   }
 
-  let { label, children }: Props = $props()
+  let { label, class: className, children }: Props = $props()
 </script>
 
-<section class="panel">
+<section class="panel {className ?? ''}">
   {#if label}
     <header class="panel-header">
       <span class="panel-label">{label}</span>
@@ -26,6 +27,8 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .panel-header {
@@ -46,5 +49,6 @@
     padding: var(--u4);
     flex: 1;
     min-width: 0;
+    min-height: 0;
   }
 </style>

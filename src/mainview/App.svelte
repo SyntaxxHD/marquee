@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from './store.ts'
+  import { AppScreen } from '$shared/app-state.ts'
   import ControlRoom from './views/ControlRoom.svelte'
   import NowPlaying from './views/NowPlaying.svelte'
   import Setup from './views/Setup.svelte'
@@ -7,9 +8,9 @@
 
 <div class="shell">
   <div class="content">
-    {#if $appState.screen === 'setup'}
+    {#if $appState.screen === Screen.Setup}
       <Setup />
-    {:else if $appState.screen === 'now-playing'}
+    {:else if $appState.screen === Screen.NowPlaying}
       <NowPlaying />
     {:else}
       <ControlRoom />

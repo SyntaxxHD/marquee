@@ -64,7 +64,9 @@ export class TmdbClient {
     }
 
     const key = await tryFetch(this.language as AvailableLanguage)
-    if (key) return key
+    if (key) {
+      return key
+    }
     return tryFetch()
   }
 

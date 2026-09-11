@@ -2,6 +2,7 @@
   import { SkipForward, X } from 'lucide-svelte'
   import { rpc } from '../rpc.ts'
   import { appState } from '../store.ts'
+  import { CueStatus } from '$shared/app-state.ts'
   import SectionPanel from '../components/SectionPanel.svelte'
   import ProgressTrack from '../components/ProgressTrack.svelte'
   import ReadoutDisplay from '../components/ReadoutDisplay.svelte'
@@ -14,7 +15,7 @@
   let elapsed = $derived(state.playback.elapsedMs)
   let duration = $derived(state.playback.durationMs ?? 0)
   let cueName = $derived(state.playback.cueName ?? '--')
-  let nextCue = $derived(state.cues.find((c) => c.status === 'pending') ?? null)
+  let nextCue = $derived(state.cues.find(c => c.status === CueStatus.Pending) ?? null)
 
   function formatTime(ms: number): string {
     const s = Math.floor(ms / 1000)

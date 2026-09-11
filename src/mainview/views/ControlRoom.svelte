@@ -119,7 +119,7 @@
 
   <div class="col col--right">
     <div class="right-top">
-      <SectionPanel label="House Lights">
+      <SectionPanel label="Room Lights">
         <div class="lights">
           {#each state.lights.lights as light (light.id)}
             <LightFader
@@ -171,7 +171,7 @@
             </div>
             <div class="progress-item">
               <span class="progress-label">Total: {state.buildProgress.itemIndex + 1} / {state.buildProgress.itemTotal}</span>
-              <ProgressTrack value={state.buildProgress.itemIndex + 1} max={state.buildProgress.itemTotal} />
+              <ProgressTrack value={state.buildProgress.itemIndex + state.buildProgress.itemPercent / 100} max={state.buildProgress.itemTotal} />
             </div>
           </div>
         </SectionPanel>

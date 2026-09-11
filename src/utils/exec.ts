@@ -8,6 +8,7 @@ export interface ExecOptions {
   errorMessage?: string
   inheritStdin?: boolean
   discardOutput?: boolean
+  stdinInput?: string
 }
 
 export interface ExecResult {
@@ -28,10 +29,19 @@ export async function exec(cmd: string[], opts: ExecOptions = {}): Promise<ExecR
   const proc = Bun.spawn(cmd, {
     cwd: opts.cwd,
     env: opts.env ? { ...process.env, ...opts.env } : undefined,
-    stdin: opts.inheritStdin ? 'inherit' : 'ignore',
+    stdin: opts.inheritStdin
+      ? 'inherit'
+      : opts.stdinInput !== undefined
+        ? 'pipe'
+        : 'ignore',
     stdout: stdio[1],
     stderr: stdio[2]
   })
+
+  if (opts.stdinInput !== undefined) {
+    proc.stdin!.write(opts.stdinInput)
+    proc.stdin!.end()
+  }
 
   await proc.exited
 

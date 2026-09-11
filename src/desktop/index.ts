@@ -29,6 +29,7 @@ let state: AppState = structuredClone(INITIAL_STATE)
 let win: BrowserWindow | null = null
 let confirmResolve: (() => void) | null = null
 let confirmReject: ((e: Error) => void) | null = null
+let pinResolve: ((pin: string) => void) | null = null
 let restoredOutputPath: string | null = null
 
 function pushState() {
@@ -202,6 +203,12 @@ function waitForConfirm(): Promise<void> {
   })
 }
 
+function waitForPin(): Promise<string> {
+  return new Promise(resolve => {
+    pinResolve = resolve
+  })
+}
+
 const rpc = defineElectrobunRPC<MarqueeRPC>('bun', {
   maxRequestTime: 120_000,
   handlers: {
@@ -217,14 +224,24 @@ const rpc = defineElectrobunRPC<MarqueeRPC>('bun', {
 
       setupDevice: async ({ backendId, device }) => {
         const backend = getBackend(backendId)
-        const config = await backend.setup(device, message => {
-          win?.webview.rpc?.send.setupProgress({ message })
-        })
+        const config = await backend.setup(
+          device,
+          message => {
+            win?.webview.rpc?.send.setupProgress({ message })
+          },
+          async protocol => {
+            win?.webview.rpc?.send.pairingPinRequired({ protocol })
+            return waitForPin()
+          }
+        )
+
         const userConfig = await loadUserConfig()
+
         if (userConfig) {
           userConfig.streamTarget = config as StreamTargetConfig
           await saveUserConfig(userConfig)
         }
+
         await initFromConfig()
         return config as StreamTargetConfig
       },
@@ -241,6 +258,11 @@ const rpc = defineElectrobunRPC<MarqueeRPC>('bun', {
 
       saveCueMode: async ({ mode }) => {
         mutate({ cueMode: mode })
+      },
+
+      submitPairingPin: async ({ pin }) => {
+        pinResolve?.(pin)
+        pinResolve = null
       },
 
       startShow: async () => {

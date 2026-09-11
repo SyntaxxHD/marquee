@@ -1,10 +1,12 @@
 <script lang="ts">
   import { Check, ChevronDown } from 'lucide-svelte'
-  import { rpc } from '../rpc.ts'
+  import { rpc, pairingProtocol } from '../rpc.ts'
   import { appState } from '../store.ts'
   import type { BackendInfo, DiscoveredDevice, LightsPluginInfo, LightInfo, DiscoveredBridge } from '$shared/rpc-schema.ts'
   import type { UserConfig, OutputResolution, OutputFps, AdSource, TrailerSource } from '../../config.ts'
   import { TMDB_LANGUAGES, ADS_LANGUAGES } from '$shared/languages.ts'
+  import { AppScreen } from '$shared/app-state.ts'
+  import { Section, SectionState, PlaybackStep, HueStep } from './setup-enums.ts'
   import Button from '../components/Button.svelte'
   import SectionPanel from '../components/SectionPanel.svelte'
   import TextInput from '../components/TextInput.svelte'
@@ -15,22 +17,17 @@
   import ToggleSwitch from '../components/ToggleSwitch.svelte'
   import LightFader from '../components/LightFader.svelte'
 
-  type Section = 'playback' | 'content' | 'output' | 'lights'
-  type SectionState = 'pending' | 'active' | 'done'
-  type PlaybackStep = 'method' | 'scan' | 'select' | 'pair' | 'done'
-  type HueStep = 'idle' | 'discovering' | 'bridge-select' | 'pair-prompt' | 'pairing' | 'lights' | 'done'
-
-  let activeSection = $state<Section>('playback')
+  let activeSection = $state<Section>(Section.Playback)
 
   let sectionStates = $state<Record<Section, SectionState>>({
-    playback: 'active',
-    content: 'pending',
-    output: 'pending',
-    lights: 'pending'
+    [Section.Playback]: SectionState.Active,
+    [Section.Content]: SectionState.Pending,
+    [Section.Output]: SectionState.Pending,
+    [Section.Lights]: SectionState.Pending
   })
 
   function sectionDone(s: Section) {
-    return sectionStates[s] === 'done'
+    return sectionStates[s] === SectionState.Done
   }
 
   function setSection(s: Section) {
@@ -38,16 +35,16 @@
   }
 
   function markDone(s: Section) {
-    sectionStates[s] = 'done'
+    sectionStates[s] = SectionState.Done
   }
 
   let canFinish = $derived(
-    sectionDone('playback') && sectionDone('content') && sectionDone('output')
+    sectionDone(Section.Playback) && sectionDone(Section.Content) && sectionDone(Section.Output)
   )
 
   async function finish() {
     await rpc.request.loadConfig()
-    await rpc.request.navigateTo({ screen: 'control-room' })
+    await rpc.request.navigateTo({ screen: AppScreen.ControlRoom })
   }
 
   $effect(() => { loadExisting() })
@@ -60,8 +57,8 @@
 
     if (config.streamTarget) {
       configuredTarget = config.streamTarget
-      playbackStep = 'done'
-      markDone('playback')
+      playbackStep = PlaybackStep.Done
+      markDone(Section.Playback)
     }
 
     if (config.tmdbApiKey || config.trailerSource === 'local') {
@@ -75,12 +72,12 @@
       adsDir = config.adsDir ?? ''
       language = config.language ?? 'en-US'
       adsLanguage = config.adsLanguage ?? 'en-US'
-      markDone('content')
+      markDone(Section.Content)
     }
     if (config.outputResolution && config.outputFps) {
       outputResolution = config.outputResolution
       outputFps = config.outputFps
-      markDone('output')
+      markDone(Section.Output)
     }
     if (config.lights) {
       hueBridgeIp = config.lights.bridgeIp
@@ -88,12 +85,13 @@
       hueLightIds = config.lights.controlledLightIds
       hueDimPercent = config.lights.dimPercent
       selectedPluginId = config.lights.type
-      markDone('lights')
+      hueStep = HueStep.Done
+      markDone(Section.Lights)
     }
   }
 
   // --- Section 1: Playback ---
-  let playbackStep = $state<PlaybackStep>('method')
+  let playbackStep = $state<PlaybackStep>(PlaybackStep.Method)
   let configuredTarget = $state<UserConfig['streamTarget']>(null)
   let backends = $state<BackendInfo[]>([])
   let selectedBackendId = $state('')
@@ -102,6 +100,7 @@
   let selectedDevice = $derived(devices.find(d => d.id === selectedDeviceId) ?? null)
   let scanning = $state(false)
   let pairing = $state(false)
+  let pairingPin = $state('')
   let playbackError = $state<string | null>(null)
 
   function targetLabel(t: NonNullable<UserConfig['streamTarget']>): string {
@@ -119,17 +118,17 @@
   })
 
   async function startScan() {
-    playbackStep = 'scan'
+    playbackStep = PlaybackStep.Scan
     scanning = true
     playbackError = null
     devices = []
     selectedDeviceId = ''
     try {
       devices = await rpc.request.discoverDevices({ backendId: selectedBackendId })
-      playbackStep = 'select'
+      playbackStep = PlaybackStep.Select
     } catch (e) {
       playbackError = (e as Error).message
-      playbackStep = 'method'
+      playbackStep = PlaybackStep.Method
     } finally {
       scanning = false
     }
@@ -140,17 +139,17 @@
       return
     }
 
-    playbackStep = 'pair'
+    playbackStep = PlaybackStep.Pair
     pairing = true
     playbackError = null
 
     try {
       await rpc.request.setupDevice({ backendId: selectedBackendId, device: selectedDevice })
-      playbackStep = 'done'
-      markDone('playback')
+      playbackStep = PlaybackStep.Done
+      markDone(Section.Playback)
     } catch (e) {
       playbackError = (e as Error).message
-      playbackStep = 'select'
+      playbackStep = PlaybackStep.Select
     } finally {
       pairing = false
     }
@@ -158,18 +157,27 @@
 
   function backPlayback() {
     playbackError = null
-    if (playbackStep === 'scan') {
-      playbackStep = 'method'
-    } else if (playbackStep === 'select') {
-      playbackStep = 'method'
-    } else if (playbackStep === 'pair') {
-      playbackStep = 'select'
+    pairingProtocol.set(null)
+    pairingPin = ''
+    if (playbackStep === PlaybackStep.Scan) {
+      playbackStep = PlaybackStep.Method
+    } else if (playbackStep === PlaybackStep.Select) {
+      playbackStep = PlaybackStep.Method
+    } else if (playbackStep === PlaybackStep.Pair) {
+      playbackStep = PlaybackStep.Select
     }
   }
 
+  async function submitPin() {
+    const pin = pairingPin
+    pairingPin = ''
+    pairingProtocol.set(null)
+    await rpc.request.submitPairingPin({ pin })
+  }
+
   function advanceToContent() {
-    markDone('playback')
-    setSection('content')
+    markDone(Section.Playback)
+    setSection(Section.Content)
   }
 
   // --- Section 2: Content ---
@@ -207,8 +215,8 @@
     await rpc.request.saveConfigFields({
       fields: { tmdbApiKey: tmdbKey, trailerSource, trailerCount, trailersDir, adSource, adCount, adsDir, language, adsLanguage }
     })
-    markDone('content')
-    setSection('output')
+    markDone(Section.Content)
+    setSection(Section.Output)
   }
 
   // --- Section 3: Output ---
@@ -217,12 +225,12 @@
 
   async function saveOutput() {
     await rpc.request.saveConfigFields({ fields: { outputResolution, outputFps } })
-    markDone('output')
-    setSection('lights')
+    markDone(Section.Output)
+    setSection(Section.Lights)
   }
 
   // --- Section 4: Lights ---
-  let hueStep = $state<HueStep>('idle')
+  let hueStep = $state<HueStep>(HueStep.Idle)
   let lightsPlugins = $state<LightsPluginInfo[]>([])
   let selectedPluginId = $state('')
   let hueBridges = $state<DiscoveredBridge[]>([])
@@ -232,6 +240,7 @@
   let hueLightIds = $state<string[]>([])
   let hueDimPercent = $state(30)
   let hueError = $state<string | null>(null)
+  let hueLoading = $state(false)
 
   let selectedPlugin = $derived(lightsPlugins.find(p => p.id === selectedPluginId) ?? null)
 
@@ -246,7 +255,7 @@
   })
 
   async function discoverBridges() {
-    hueStep = 'discovering'
+    hueStep = HueStep.Discovering
     hueError = null
     try {
       hueBridges = await rpc.request.discoverLightBridges({ pluginId: selectedPluginId })
@@ -255,23 +264,36 @@
         hueBridgeIp = hueBridges[0].ip
       }
 
-      hueStep = 'bridge-select'
+      hueStep = HueStep.BridgeSelect
     } catch (e) {
       hueError = (e as Error).message
-      hueStep = 'idle'
+      hueStep = HueStep.Idle
     }
   }
 
   async function pairBridge() {
-    hueStep = 'pairing'
+    hueStep = HueStep.Pairing
     hueError = null
     try {
       hueUsername = await rpc.request.pairLightBridge({ pluginId: selectedPluginId, ip: hueBridgeIp })
       hueLights = await rpc.request.listLights({ pluginId: selectedPluginId, ip: hueBridgeIp, credentials: hueUsername })
-      hueStep = 'lights'
+      hueStep = HueStep.Lights
     } catch (e) {
       hueError = (e as Error).message
-      hueStep = 'pair-prompt'
+      hueStep = HueStep.PairPrompt
+    }
+  }
+
+  async function loadLightsForEdit() {
+    hueLoading = true
+    hueError = null
+    try {
+      hueLights = await rpc.request.listLights({ pluginId: selectedPluginId, ip: hueBridgeIp, credentials: hueUsername })
+      hueStep = HueStep.Lights
+    } catch (e) {
+      hueError = (e as Error).message
+    } finally {
+      hueLoading = false
     }
   }
 
@@ -295,26 +317,26 @@
         }
       }
     })
-    markDone('lights')
-    hueStep = 'done'
+    markDone(Section.Lights)
+    hueStep = HueStep.Done
   }
 
   async function skipHue() {
     await rpc.request.saveConfigFields({ fields: { lights: null } })
-    markDone('lights')
+    markDone(Section.Lights)
   }
 
   const SECTIONS: { id: Section; label: string }[] = [
-    { id: 'playback', label: 'Playback Device' },
-    { id: 'content', label: 'Content' },
-    { id: 'output', label: 'Output' },
-    { id: 'lights', label: 'Lights' }
+    { id: Section.Playback, label: 'Playback Device' },
+    { id: Section.Content, label: 'Content' },
+    { id: Section.Output, label: 'Output' },
+    { id: Section.Lights, label: 'Lights' }
   ]
 </script>
 
 <div class="setup">
   <div class="wizard-topbar">
-    <button class="wizard-back" onclick={() => rpc.request.navigateTo({ screen: 'control-room' })}>← Back</button>
+    <button class="wizard-back" onclick={() => rpc.request.navigateTo({ screen: AppScreen.ControlRoom })}>← Back</button>
   </div>
   <div class="wizard-body">
     <nav class="sidebar">
@@ -324,19 +346,19 @@
         <button
           class="step-btn"
           class:is-active={activeSection === s.id}
-          class:is-done={state === 'done'}
-          disabled={state === 'pending' && s.id !== 'lights'}
+          class:is-done={state === SectionState.Done}
+          disabled={state === SectionState.Pending && s.id !== Section.Lights}
           onclick={() => setSection(s.id)}
         >
           <span class="step-num">
-            {#if state === 'done'}
+            {#if state === SectionState.Done}
               <Check size={12} />
             {:else}
               {i + 1}
             {/if}
           </span>
           <span class="step-label">{s.label}</span>
-          {#if s.id === 'lights'}
+          {#if s.id === Section.Lights}
             <span class="step-opt">opt.</span>
           {/if}
         </button>
@@ -351,14 +373,14 @@
   </nav>
 
   <main class="content">
-    {#if activeSection === 'playback'}
+    {#if activeSection === Section.Playback}
       <div class="section-wrap">
         <div class="section-head">
           <h2 class="section-title">Playback Device</h2>
           <p class="section-desc">Choose how marquee streams the pre-show to your screen.</p>
         </div>
 
-        {#if playbackStep === 'method'}
+        {#if playbackStep === PlaybackStep.Method}
           <SectionPanel label="Method">
             <div class="card-list">
               {#each backends as b (b.id)}
@@ -382,7 +404,7 @@
             <Button variant="primary" onclick={startScan}>Scan for Devices</Button>
           </div>
 
-        {:else if playbackStep === 'scan'}
+        {:else if playbackStep === PlaybackStep.Scan}
           <SectionPanel label="Scanning">
             <div class="centered">
               <Spinner size={24} />
@@ -390,7 +412,7 @@
             </div>
           </SectionPanel>
 
-        {:else if playbackStep === 'select'}
+        {:else if playbackStep === PlaybackStep.Select}
           <SectionPanel label="Select Device">
             {#if devices.length === 0}
               <p class="empty-state">No devices found.</p>
@@ -416,18 +438,29 @@
             <Button variant="primary" disabled={!selectedDevice} onclick={startPairing}>Pair</Button>
           </div>
 
-        {:else if playbackStep === 'pair'}
+        {:else if playbackStep === PlaybackStep.Pair}
           <SectionPanel label="Pairing">
+            {#if $pairingProtocol}
+              <p class="hint-text">
+                Enter the <strong>{$pairingProtocol === 'companion' ? 'control' : 'AirPlay'}</strong> PIN shown on your Apple TV.
+              </p>
+              <div class="key-row">
+                <TextInput bind:value={pairingPin} placeholder="0000" />
+                <Button variant="primary" disabled={pairingPin.length < 4} onclick={submitPin}>Submit</Button>
+              </div>
+              {#if playbackError}
+                <p class="error-msg">{playbackError}</p>
+              {/if}
+            {:else if pairing}
+              <div class="pair-waiting">
+                <Spinner size={14} />
+                <span>Waiting for Apple TV…</span>
+              </div>
+            {/if}
             <div class="pair-log">
               {#each $appState.log as line}
                 <div class="log-line">{line}</div>
               {/each}
-              {#if pairing}
-                <div class="pair-waiting">
-                  <Spinner size={14} />
-                  <span>Waiting for confirmation…</span>
-                </div>
-              {/if}
             </div>
           </SectionPanel>
           {#if !pairing}
@@ -436,7 +469,7 @@
             </div>
           {/if}
 
-        {:else if playbackStep === 'done'}
+        {:else if playbackStep === PlaybackStep.Done}
           <SectionPanel label="Device Ready">
             <div class="success-row">
               <StatusBadge
@@ -446,13 +479,13 @@
             </div>
           </SectionPanel>
           <div class="step-actions">
-            <Button variant="ghost" onclick={() => { playbackStep = 'method' }}>Change Device</Button>
+            <Button variant="ghost" onclick={() => { playbackStep = PlaybackStep.Method }}>Change Device</Button>
             <Button variant="primary" onclick={advanceToContent}>Continue</Button>
           </div>
         {/if}
       </div>
 
-    {:else if activeSection === 'content'}
+    {:else if activeSection === Section.Content}
       <div class="section-wrap">
         <div class="section-head">
           <h2 class="section-title">Content</h2>
@@ -556,7 +589,7 @@
         </div>
       </div>
 
-    {:else if activeSection === 'output'}
+    {:else if activeSection === Section.Output}
       <div class="section-wrap">
         <div class="section-head">
           <h2 class="section-title">Output</h2>
@@ -593,7 +626,7 @@
         </div>
       </div>
 
-    {:else if activeSection === 'lights'}
+    {:else if activeSection === Section.Lights}
       <div class="section-wrap">
         <div class="section-head">
           <div class="section-head-icon">
@@ -601,13 +634,13 @@
           </div>
           <div>
             <h2 class="section-title">{selectedPlugin?.label ?? 'Lights'}</h2>
-            <p class="section-desc">Control house lights during the show.</p>
+            <p class="section-desc">Control room lights during the show.</p>
           </div>
         </div>
 
-        {#if hueStep === 'idle' || hueStep === 'discovering'}
+        {#if hueStep === HueStep.Idle || hueStep === HueStep.Discovering}
           <SectionPanel label="Bridge">
-            {#if hueStep === 'discovering'}
+            {#if hueStep === HueStep.Discovering}
               <div class="centered">
                 <Spinner size={20} />
                 <span class="hint-text">Searching for Hue bridges…</span>
@@ -621,10 +654,10 @@
           </SectionPanel>
           <div class="step-actions">
             <Button variant="ghost" onclick={skipHue}>Skip</Button>
-            <Button variant="primary" onclick={discoverBridges} disabled={hueStep === 'discovering'}>Discover Bridge</Button>
+            <Button variant="primary" onclick={discoverBridges} disabled={hueStep === HueStep.Discovering}>Discover Bridge</Button>
           </div>
 
-        {:else if hueStep === 'bridge-select'}
+        {:else if hueStep === HueStep.BridgeSelect}
           <SectionPanel label="Select Bridge">
             {#if hueBridges.length > 0}
               <div class="card-list">
@@ -632,6 +665,8 @@
                   <RadioCard value={bridge.ip} bind:group={hueBridgeIp} label={bridge.ip} description={bridge.label ?? 'Discovered automatically'} />
                 {/each}
               </div>
+            {:else}
+              <p class="empty-state">No bridges found. Enter the IP address manually or try again.</p>
             {/if}
             <div class="field-group">
               <label class="field-label-block">Bridge IP address</label>
@@ -640,10 +675,11 @@
           </SectionPanel>
           <div class="step-actions">
             <Button variant="ghost" onclick={skipHue}>Skip</Button>
-            <Button variant="primary" disabled={!hueBridgeIp} onclick={() => { hueStep = 'pair-prompt' }}>Connect</Button>
+            <Button variant="ghost" onclick={discoverBridges}>Try Again</Button>
+            <Button variant="primary" disabled={!hueBridgeIp} onclick={() => { hueStep = HueStep.PairPrompt }}>Connect</Button>
           </div>
 
-        {:else if hueStep === 'pair-prompt'}
+        {:else if hueStep === HueStep.PairPrompt}
           <SectionPanel label="Pair Bridge">
             <p class="hint-text">Press the <strong>link button</strong> on your Hue bridge, then click Pair within 30 seconds.</p>
             {#if hueError}
@@ -651,12 +687,12 @@
             {/if}
           </SectionPanel>
           <div class="step-actions">
-            <Button variant="ghost" onclick={() => { hueStep = 'bridge-select'; hueError = null }}>Back</Button>
+            <Button variant="ghost" onclick={() => { hueStep = HueStep.BridgeSelect; hueError = null }}>Back</Button>
             <Button variant="ghost" onclick={skipHue}>Skip</Button>
             <Button variant="primary" onclick={pairBridge}>Pair</Button>
           </div>
 
-        {:else if hueStep === 'pairing'}
+        {:else if hueStep === HueStep.Pairing}
           <SectionPanel label="Pairing">
             <div class="centered">
               <Spinner size={20} />
@@ -664,7 +700,7 @@
             </div>
           </SectionPanel>
 
-        {:else if hueStep === 'lights'}
+        {:else if hueStep === HueStep.Lights}
           <SectionPanel label="Select Lights">
             <p class="hint-text-sm">Choose which lights marquee controls during the show.</p>
             <div class="light-list">
@@ -694,10 +730,20 @@
             <Button variant="primary" disabled={hueLightIds.length === 0} onclick={saveHue}>Save Lights</Button>
           </div>
 
-        {:else if hueStep === 'done'}
+        {:else if hueStep === HueStep.Done}
           <SectionPanel label="Hue Connected">
             <StatusBadge state="done" label={`${hueLightIds.length} light${hueLightIds.length === 1 ? '' : 's'} configured`} />
+            {#if hueError}
+              <p class="error-msg">{hueError}</p>
+            {/if}
           </SectionPanel>
+          <div class="step-actions">
+            {#if hueLoading}
+              <Spinner size={14} />
+            {:else}
+              <Button variant="ghost" onclick={loadLightsForEdit}>Edit Lights</Button>
+            {/if}
+          </div>
         {/if}
       </div>
     {/if}

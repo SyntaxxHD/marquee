@@ -8,9 +8,9 @@
 
 <div class="shell">
   <div class="content">
-    {#if $appState.screen === Screen.Setup}
+    {#if $appState.screen === AppScreen.Setup}
       <Setup />
-    {:else if $appState.screen === Screen.NowPlaying}
+    {:else if $appState.screen === AppScreen.NowPlaying}
       <NowPlaying />
     {:else}
       <ControlRoom />

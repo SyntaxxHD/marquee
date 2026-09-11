@@ -10,7 +10,8 @@ export interface StreamingBackend<TConfig extends { type: string }> {
   discover(timeoutMs?: number): Promise<DiscoveredDevice[]>
   setup(
     device: DiscoveredDevice,
-    onProgress?: (message: string) => void
+    onProgress?: (message: string) => void,
+    onPinRequired?: (protocol: string) => Promise<string>
   ): Promise<TConfig>
   probe(config: TConfig): Promise<boolean>
   play(filePath: string, config: TConfig): Promise<void>

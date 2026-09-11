@@ -1,8 +1,11 @@
 import { Electroview } from 'electrobun/view'
+import { writable } from 'svelte/store'
 
 import { appState } from './store.ts'
 
 import type { MarqueeRPC } from '$shared/rpc-schema.ts'
+
+export const pairingProtocol = writable<string | null>(null)
 
 export const rpc = Electroview.defineRPC<MarqueeRPC>({
   maxRequestTime: 60_000,
@@ -16,7 +19,8 @@ export const rpc = Electroview.defineRPC<MarqueeRPC>({
           log: [...s.log.slice(-49), message]
         }))
       },
-      phaseChanged: ({ phase }) => appState.update(s => ({ ...s, phase }))
+      phaseChanged: ({ phase }) => appState.update(s => ({ ...s, phase })),
+      pairingPinRequired: ({ protocol }) => pairingProtocol.set(protocol)
     }
   }
 })

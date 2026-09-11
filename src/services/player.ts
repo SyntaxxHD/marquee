@@ -117,15 +117,16 @@ export async function probeAppleTV(target: AppleTVTarget): Promise<boolean> {
   return result.exitCode === 0
 }
 
-export async function pairAppleTV(target: AppleTVTarget): Promise<void> {
+export async function pairAppleTV(
+  target: AppleTVTarget,
+  onPinRequired: (protocol: string) => Promise<string>
+): Promise<void> {
   const bins = await resolveBinaries()
 
   await mkdir(dirname(PYATV_STORAGE_FILE), { recursive: true })
 
   for (const protocol of ['companion', 'airplay']) {
-    const label = protocol === 'companion' ? 'control' : 'AirPlay'
-    console.log(`Enter the ${label} PIN shown on your TV:`)
-
+    const pin = await onPinRequired(protocol)
     const args = [
       ...atvremoteArgs(bins.atvremote, target),
       '--protocol',
@@ -133,8 +134,7 @@ export async function pairAppleTV(target: AppleTVTarget): Promise<void> {
       'pair'
     ]
     await execOrThrow(args, {
-      inheritStdin: true,
-      discardOutput: true,
+      stdinInput: pin + '\n',
       errorMessage: `${protocol} pairing failed for ${target.name} (${target.address})`
     })
   }

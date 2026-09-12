@@ -30,8 +30,6 @@ export async function downloadVideo(
     ytdlp
       .exec([
         `https://www.youtube.com/watch?v=${youtubeId}`,
-        '--extractor-args',
-        'youtube:player_client=android',
         '-f',
         YTDLP_FORMAT,
         '--merge-output-format',

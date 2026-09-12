@@ -4,6 +4,7 @@
   import ControlRoom from './views/ControlRoom.svelte'
   import NowPlaying from './views/NowPlaying.svelte'
   import Setup from './views/Setup.svelte'
+  import Toast from './components/Toast.svelte'
 </script>
 
 <div class="shell">
@@ -16,6 +17,7 @@
       <ControlRoom />
     {/if}
   </div>
+  <Toast />
 </div>
 
 <style>

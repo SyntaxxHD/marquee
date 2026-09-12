@@ -173,13 +173,23 @@ async function waitForPlaybackEnd(
 ): Promise<void> {
   await Bun.sleep(10000)
 
-  const maxPolls = 720 // 1 hour max
+  const maxPolls = 720
+  let consecutiveFailures = 0
+
   for (let i = 0; i < maxPolls; i++) {
     const args = [...atvremoteArgs(atvremote, target), 'playing']
     const result = await exec(args, { captureOutput: true, silent: true })
+
     if (result.exitCode !== 0) {
-      break
+      consecutiveFailures++
+      if (consecutiveFailures >= 3) {
+        break
+      }
+      await Bun.sleep(5000)
+      continue
     }
+
+    consecutiveFailures = 0
     const state = result.stdout.toLowerCase()
 
     if (state.includes('devicestate: idle') || state.includes('devicestate: stopped')) {

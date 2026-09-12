@@ -115,10 +115,14 @@ export class HueClient {
     lightIds: string[],
     state: HueModel.LightState
   ): Promise<void> {
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Hue bridge timeout')), 5000)
+    )
     try {
-      const bridge = await hueApi
-        .createInsecureLocal(this.bridgeIp)
-        .connect(this.username)
+      const bridge = await Promise.race([
+        hueApi.createInsecureLocal(this.bridgeIp).connect(this.username),
+        timeout
+      ])
       await Promise.all(
         lightIds.map(id =>
           bridge.lights.setLightState(id, state).catch((err: Error) => {

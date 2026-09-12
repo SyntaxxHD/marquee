@@ -1,10 +1,19 @@
+import { rm } from 'fs/promises'
+
 import { BrowserWindow, Tray, Utils, Updater } from 'electrobun/main'
 import { defineElectrobunRPC } from 'electrobun/main'
 
 import { listBackends, getBackend } from '../backends/registry.ts'
 import type { StreamTargetConfig } from '../backends/types.ts'
 import { runBuild } from '../commands/build.ts'
-import { loadUserConfig, saveUserConfig } from '../config.ts'
+import {
+  loadUserConfig,
+  saveUserConfig,
+  CACHE_DIR,
+  ADS_CACHE_DIR,
+  NORM_CACHE_DIR,
+  OUTPUT_DIR
+} from '../config.ts'
 import {
   listLightsPlugins,
   getLightsPlugin,
@@ -43,6 +52,10 @@ function mutate(patch: Partial<AppState>) {
 
 function appendLog(message: string) {
   mutate({ log: [...state.log.slice(-49), message] })
+}
+
+function updateCue(id: string, status: CueStatus) {
+  mutate({ cues: state.cues.map(c => (c.id === id ? { ...c, status } : c)) })
 }
 
 async function initFromConfig() {
@@ -106,13 +119,24 @@ async function streamPrebuilt(outputPath: string): Promise<void> {
   const dimPercent = lightsConfig?.dimPercent ?? 30
 
   mutate({ phase: ShowPhase.LightsDimming })
+  updateCue('__lights-dim__', CueStatus.Active)
 
   if (lightsClient) {
     appendLog(`Lights → dim (${dimPercent}%)`)
     await lightsClient.dim(lightIds, dimPercent)
   }
 
-  mutate({ phase: ShowPhase.Playing, screen: AppScreen.NowPlaying })
+  updateCue('__lights-dim__', CueStatus.Done)
+
+  mutate({
+    phase: ShowPhase.Playing,
+    screen: AppScreen.NowPlaying,
+    cues: state.cues.map(c =>
+      c.id !== '__lights-dim__' && c.id !== '__lights-off__'
+        ? { ...c, status: CueStatus.Active }
+        : c
+    )
+  })
   appendLog('Playback started')
 
   const backend = getBackend(userConfig.streamTarget.type)
@@ -121,10 +145,11 @@ async function streamPrebuilt(outputPath: string): Promise<void> {
   } finally {
     await clearSession()
     mutate({ phase: ShowPhase.LightsOff, screen: AppScreen.ControlRoom })
+    updateCue('__lights-off__', CueStatus.Active)
 
     if (lightsClient) {
-      appendLog('Lights → off')
-      await lightsClient.off(lightIds)
+      appendLog('Lights → 0%')
+      await lightsClient.dim(lightIds, 0)
     }
 
     mutate({
@@ -150,6 +175,7 @@ async function runShowSequence() {
   const lightsPlugin = lightsConfig ? getLightsPluginFor(lightsConfig) : null
   const lightsClient = lightsPlugin ? lightsPlugin.createClient(lightsConfig!) : null
   const lightIds = lightsConfig?.controlledLightIds ?? []
+  const dimPercent = lightsConfig?.dimPercent ?? 30
 
   mutate({ busy: true, error: null, phase: ShowPhase.LightsOn, cues: [] })
 
@@ -165,27 +191,62 @@ async function runShowSequence() {
     onLog: message => appendLog(message),
     onProgress: progress => mutate({ buildProgress: progress }),
     onDownloadsComplete: async partialCues => {
-      const mapped = partialCues.map((c, i) => ({
+      const videoCues = partialCues.map((c, i) => ({
         id: String(i),
         label: c.label,
         durationMs: c.durationMs ?? null,
         status: CueStatus.Pending
       }))
+      const mapped = lightsConfig
+        ? [
+            {
+              id: '__lights-dim__',
+              label: `Lights → ${dimPercent}%`,
+              durationMs: null,
+              status: CueStatus.Pending
+            },
+            ...videoCues,
+            {
+              id: '__lights-off__',
+              label: 'Lights → 0%',
+              durationMs: null,
+              status: CueStatus.Pending
+            }
+          ]
+        : videoCues
 
       mutate({ cues: mapped })
       await saveSession({ partial: true, outputPath: '', cues: mapped, log: state.log })
     }
   })
 
-  const mappedCues = cues.map((c, i) => ({
+  const videoCues = cues.map((c, i) => ({
     id: String(i),
     label: c.label,
     durationMs: c.durationMs ?? null,
     status: CueStatus.Pending
   }))
 
-  mutate({ buildProgress: null, cues: mappedCues })
-  await saveSession({ partial: false, outputPath, cues: mappedCues, log: state.log })
+  const finalCues = lightsConfig
+    ? [
+        {
+          id: '__lights-dim__',
+          label: `Lights → ${dimPercent}%`,
+          durationMs: null,
+          status: CueStatus.Pending
+        },
+        ...videoCues,
+        {
+          id: '__lights-off__',
+          label: 'Lights → 0%',
+          durationMs: null,
+          status: CueStatus.Pending
+        }
+      ]
+    : videoCues
+
+  mutate({ buildProgress: null, cues: finalCues })
+  await saveSession({ partial: false, outputPath, cues: finalCues, log: state.log })
 
   if (state.cueMode === CueMode.Manual) {
     mutate({ phase: ShowPhase.Ready })
@@ -337,6 +398,18 @@ const rpc = defineElectrobunRPC<MarqueeRPC>('bun', {
 
         restoredOutputPath = null
         await clearSession()
+        mutate({ cues: [], phase: ShowPhase.Idle, error: null, restoredPartial: false })
+      },
+
+      clearCache: async () => {
+        await Promise.allSettled([
+          rm(CACHE_DIR, { recursive: true, force: true }),
+          rm(ADS_CACHE_DIR, { recursive: true, force: true }),
+          rm(NORM_CACHE_DIR, { recursive: true, force: true }),
+          rm(OUTPUT_DIR, { recursive: true, force: true })
+        ])
+        await clearSession()
+        restoredOutputPath = null
         mutate({ cues: [], phase: ShowPhase.Idle, error: null, restoredPartial: false })
       },
 

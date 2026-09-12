@@ -1,8 +1,8 @@
 <script lang="ts">
   import { get } from 'svelte/store'
-  import { Play, Square, Trash2, Upload, Settings } from 'lucide-svelte'
+  import { Play, Square, Trash2, Upload, Settings, Eraser } from 'lucide-svelte'
   import { rpc } from '../rpc.ts'
-  import { appState } from '../store.ts'
+  import { appState, toastMessage } from '../store.ts'
   import { ShowPhase, CueMode, AppScreen } from '$shared/app-state.ts'
   import Button from '../components/Button.svelte'
   import IconButton from '../components/IconButton.svelte'
@@ -38,6 +38,12 @@
 
   async function handleClearCues() {
     await rpc.request.clearCues()
+  }
+
+  async function handleClearCache() {
+    await rpc.request.clearCache()
+    toastMessage.set('Cache cleared')
+    setTimeout(() => toastMessage.set(null), 3000)
   }
 
   async function handleStreamFile() {
@@ -153,6 +159,7 @@
               </Button>
             {/if}
             <IconButton icon={Upload} label="Stream file" onclick={handleStreamFile} />
+            <IconButton icon={Eraser} label="Clear cache" onclick={handleClearCache} />
             <IconButton icon={Settings} label="Change device" onclick={handleSetup} />
           {/if}
         </div>
@@ -215,7 +222,7 @@
 
   .panels {
     display: grid;
-    grid-template-columns: 1fr 320px;
+    grid-template-columns: 1fr 360px;
     grid-template-rows: 1fr;
     gap: var(--u4);
     flex: 1;

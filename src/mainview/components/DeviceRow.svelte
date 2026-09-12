@@ -10,8 +10,8 @@
   let { device }: Props = $props()
 
   let reachState = $derived(
-    device.reachable === null ? 'idle' : device.reachable ? 'active' : 'fault'
-  ) as 'idle' | 'active' | 'fault'
+    device.reachable === null ? 'idle' : device.reachable ? 'done' : 'fault'
+  ) as 'idle' | 'done' | 'fault'
 
   let reachLabel = $derived(
     device.reachable === null ? 'unknown' : device.reachable ? 'online' : 'offline'

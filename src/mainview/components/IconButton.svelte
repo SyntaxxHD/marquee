@@ -37,6 +37,31 @@
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
     flex-shrink: 0;
+    position: relative;
+  }
+
+  .icon-btn::after {
+    content: attr(aria-label);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 3px 7px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-family: var(--font-mono);
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+    z-index: 10;
+  }
+
+  .icon-btn:not(:disabled):hover::after {
+    opacity: 1;
   }
 
   .icon-btn:disabled {

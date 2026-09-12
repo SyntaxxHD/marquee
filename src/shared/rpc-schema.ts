@@ -27,6 +27,7 @@ export type MarqueeRPC = {
       cancelShow: { params: undefined; response: void }
       clearCues: { params: undefined; response: void }
       clearCache: { params: undefined; response: void }
+      devStart: { params: undefined; response: void }
       submitPairingPin: { params: { pin: string }; response: void }
       streamFile: { params: { filePath: string }; response: void }
       setLightLevel: { params: { lightId: string; level: number }; response: void }

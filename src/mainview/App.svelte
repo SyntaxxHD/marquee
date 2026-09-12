@@ -18,6 +18,7 @@
     {/if}
   </div>
   <Toast />
+  <span class="build-id">b08</span>
 </div>
 
 <style>
@@ -26,11 +27,23 @@
     flex-direction: column;
     height: 100vh;
     overflow: hidden;
+    position: relative;
   }
 
   .content {
     flex: 1;
     min-height: 0;
     overflow: hidden;
+  }
+
+  .build-id {
+    position: absolute;
+    bottom: 6px;
+    right: 8px;
+    font-family: monospace;
+    font-size: 10px;
+    opacity: 0.3;
+    pointer-events: none;
+    user-select: none;
   }
 </style>

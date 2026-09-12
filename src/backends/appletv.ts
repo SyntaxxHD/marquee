@@ -3,7 +3,8 @@ import {
   pairAppleTV,
   playViaAppleTV,
   probeAppleTV,
-  resolveTarget
+  resolveTarget,
+  resumeAppleTVPlayback
 } from '../services/player.ts'
 import { MarqueeError } from '../utils/errors.ts'
 
@@ -35,7 +36,11 @@ export const appleTVBackend: StreamingBackend<AppleTVConfig> = {
     return probeAppleTV(config)
   },
 
-  async play(filePath, config) {
-    await playViaAppleTV(filePath, config)
+  async play(filePath, config, signal, durationMs, onPlaybackStart) {
+    await playViaAppleTV(filePath, config, signal, durationMs, onPlaybackStart)
+  },
+
+  async resumePlayback(config) {
+    await resumeAppleTVPlayback(config)
   }
 }

@@ -157,8 +157,14 @@ export async function runBuild(callbacks?: BuildCallbacks): Promise<BuildResult>
   })
 
   const cues: BuildCue[] = [
-    ...ads.map(a => ({ label: a.title, durationMs: null })),
-    ...trailerItems.map(t => ({ label: t.title, durationMs: null }))
+    ...ads.map((a, i) => ({
+      label: a.title,
+      durationMs: result.segmentDurations[i] ?? null
+    })),
+    ...trailerItems.map((t, i) => ({
+      label: t.title,
+      durationMs: result.segmentDurations[ads.length + i] ?? null
+    }))
   ]
 
   return { outputPath: result.outputPath, tmpDir, cues }

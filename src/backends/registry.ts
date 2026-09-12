@@ -24,5 +24,5 @@ export function getBackend(id: string): StreamingBackend<StreamTargetConfig> {
 export function getBackendFor<T extends StreamTargetConfig>(
   config: T
 ): StreamingBackend<T> {
-  return getBackend(config.type) as StreamingBackend<T>
+  return getBackend(config.type) as unknown as StreamingBackend<T>
 }

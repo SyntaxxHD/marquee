@@ -104,11 +104,14 @@ export class HueClient {
   }
 
   async dimLights(lightIds: string[], percent: number): Promise<void> {
-    await this.applyState(lightIds, new model.LightState().on().brightness(percent))
+    await this.applyState(
+      lightIds,
+      new model.LightState().on().brightness(percent).transitiontime(30)
+    )
   }
 
   async turnLightsOff(lightIds: string[]): Promise<void> {
-    await this.applyState(lightIds, new model.LightState().off())
+    await this.applyState(lightIds, new model.LightState().off().transitiontime(30))
   }
 
   private async applyState(
@@ -123,13 +126,17 @@ export class HueClient {
         hueApi.createInsecureLocal(this.bridgeIp).connect(this.username),
         timeout
       ])
-      await Promise.all(
-        lightIds.map(id =>
-          bridge.lights.setLightState(id, state).catch((err: Error) => {
-            console.warn(`Hue light ${id} failed: ${err.message}`)
-          })
-        )
-      )
+      const lightStateTimeout = new Promise<void>(resolve => setTimeout(resolve, 6000))
+      await Promise.race([
+        Promise.all(
+          lightIds.map(id =>
+            bridge.lights.setLightState(id, state).catch((err: Error) => {
+              console.warn(`Hue light ${id} failed: ${err.message}`)
+            })
+          )
+        ),
+        lightStateTimeout
+      ])
     } catch (err) {
       console.warn(`Hue bridge unreachable: ${(err as Error).message}`)
     }

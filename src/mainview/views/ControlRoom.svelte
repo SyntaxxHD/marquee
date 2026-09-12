@@ -1,6 +1,6 @@
 <script lang="ts">
   import { get } from 'svelte/store'
-  import { Play, Square, Trash2, Upload, Settings, Eraser } from 'lucide-svelte'
+  import { Play, Square, Trash2, Upload, Settings, Eraser, Zap } from 'lucide-svelte'
   import { rpc } from '../rpc.ts'
   import { appState, toastMessage } from '../store.ts'
   import { ShowPhase, CueMode, AppScreen } from '$shared/app-state.ts'
@@ -44,6 +44,10 @@
     await rpc.request.clearCache()
     toastMessage.set('Cache cleared')
     setTimeout(() => toastMessage.set(null), 3000)
+  }
+
+  async function handleDevStart() {
+    await rpc.request.devStart(undefined)
   }
 
   async function handleStreamFile() {
@@ -159,6 +163,7 @@
               </Button>
             {/if}
             <IconButton icon={Upload} label="Stream file" onclick={handleStreamFile} />
+            <IconButton icon={Zap} label="Dev run (cached)" onclick={handleDevStart} />
             <IconButton icon={Eraser} label="Clear cache" onclick={handleClearCache} />
             <IconButton icon={Settings} label="Change device" onclick={handleSetup} />
           {/if}

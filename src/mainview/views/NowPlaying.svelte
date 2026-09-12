@@ -63,9 +63,9 @@
   </SectionPanel>
 
   <div class="side">
-    {#if state.hue.configured}
+    {#if state.lights.configured}
       <SectionPanel label="Room Lights">
-        {#each state.hue.lights as light (light.id)}
+        {#each state.lights.lights as light (light.id)}
           <LightFader
             label={light.name}
             value={light.level}

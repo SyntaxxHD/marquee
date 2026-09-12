@@ -148,53 +148,79 @@ export async function resolveTarget(
   return { name, id, address }
 }
 
+export async function probeFileDuration(filePath: string): Promise<number | null> {
+  const bins = await resolveBinaries()
+  const result = await exec(
+    [bins.ffprobe, '-v', 'quiet', '-print_format', 'json', '-show_format', filePath],
+    { captureOutput: true, silent: true }
+  )
+  if (result.exitCode !== 0) {
+    return null
+  }
+  try {
+    const json = JSON.parse(result.stdout) as { format?: { duration?: string } }
+    const seconds = parseFloat(json.format?.duration ?? '')
+    return isNaN(seconds) ? null : seconds * 1000
+  } catch {
+    return null
+  }
+}
+
 export async function playViaAppleTV(
   filePath: string,
-  appleTV: AppleTVTarget
+  appleTV: AppleTVTarget,
+  signal?: AbortSignal,
+  durationMs?: number,
+  onPlaybackStart?: () => void
 ): Promise<void> {
   const bins = await resolveBinaries()
   const { fileUrl, stopServer } = serveFile(filePath, appleTV.address)
 
+  const proc = Bun.spawn(
+    [...atvremoteArgs(bins.atvremote, appleTV), `play_url=${fileUrl}`],
+    { stdout: 'ignore', stderr: 'ignore', stdin: 'ignore' }
+  )
+
   try {
-    console.log(`Sending to ${appleTV.name} (${appleTV.address})`)
+    await abortableSleep(15_000, signal)
+    if (signal?.aborted) {
+      return
+    }
 
-    const args = [...atvremoteArgs(bins.atvremote, appleTV), `play_url=${fileUrl}`]
-    await exec(args, { captureOutput: true, silent: true })
+    onPlaybackStart?.()
 
-    await waitForPlaybackEnd(bins.atvremote, appleTV)
+    const TWO_HOURS = 2 * 60 * 60 * 1000
+    await abortableSleep(Math.max(0, (durationMs ?? TWO_HOURS) - 15_000), signal)
   } finally {
+    proc.kill()
     stopServer()
+    if (signal?.aborted) {
+      await exec([...atvremoteArgs(bins.atvremote, appleTV), 'stop'], {
+        captureOutput: true,
+        silent: true
+      }).catch(() => {})
+    }
   }
 }
 
-async function waitForPlaybackEnd(
-  atvremote: string,
-  target: AppleTVTarget
-): Promise<void> {
-  await Bun.sleep(10000)
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>(resolve => {
+    const timer = setTimeout(resolve, ms)
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer)
+        resolve()
+      },
+      { once: true }
+    )
+  })
+}
 
-  const maxPolls = 720
-  let consecutiveFailures = 0
-
-  for (let i = 0; i < maxPolls; i++) {
-    const args = [...atvremoteArgs(atvremote, target), 'playing']
-    const result = await exec(args, { captureOutput: true, silent: true })
-
-    if (result.exitCode !== 0) {
-      consecutiveFailures++
-      if (consecutiveFailures >= 3) {
-        break
-      }
-      await Bun.sleep(5000)
-      continue
-    }
-
-    consecutiveFailures = 0
-    const state = result.stdout.toLowerCase()
-
-    if (state.includes('devicestate: idle') || state.includes('devicestate: stopped')) {
-      break
-    }
-    await Bun.sleep(5000)
-  }
+export async function resumeAppleTVPlayback(appleTV: AppleTVTarget): Promise<void> {
+  const bins = await resolveBinaries()
+  await exec([...atvremoteArgs(bins.atvremote, appleTV), 'play'], {
+    captureOutput: true,
+    silent: true
+  })
 }

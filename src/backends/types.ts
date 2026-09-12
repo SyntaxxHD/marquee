@@ -14,7 +14,14 @@ export interface StreamingBackend<TConfig extends { type: string }> {
     onPinRequired?: (protocol: string) => Promise<string>
   ): Promise<TConfig>
   probe(config: TConfig): Promise<boolean>
-  play(filePath: string, config: TConfig): Promise<void>
+  play(
+    filePath: string,
+    config: TConfig,
+    signal?: AbortSignal,
+    durationMs?: number,
+    onPlaybackStart?: () => void
+  ): Promise<void>
+  resumePlayback?: (config: TConfig) => Promise<void>
 }
 
 export interface AppleTVConfig {

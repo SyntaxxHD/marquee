@@ -22,7 +22,10 @@ export const quickTimeBackend: StreamingBackend<QuickTimeConfig> = {
     return process.platform === 'darwin'
   },
 
-  async play(filePath, config) {
+  async play(filePath, config, signal) {
+    if (signal?.aborted) {
+      return
+    }
     await playInQuickTime(filePath, config.deviceName)
   }
 }

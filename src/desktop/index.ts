@@ -1,4 +1,6 @@
-import { rm } from 'fs/promises'
+import { mkdir, readdir, rm, stat } from 'fs/promises'
+import { tmpdir } from 'os'
+import { basename, join } from 'path'
 
 import { BrowserWindow, Tray, Utils, Updater } from 'electrobun/main'
 import { defineElectrobunRPC } from 'electrobun/main'
@@ -19,6 +21,8 @@ import {
   getLightsPlugin,
   getLightsPluginFor
 } from '../lights/registry.ts'
+import { concatSegments } from '../services/assemble.ts'
+import { probeFileDuration } from '../services/player.ts'
 import { TmdbClient } from '../services/tmdb.ts'
 import {
   INITIAL_STATE,
@@ -40,6 +44,7 @@ let confirmResolve: (() => void) | null = null
 let confirmReject: ((e: Error) => void) | null = null
 let pinResolve: ((pin: string) => void) | null = null
 let restoredOutputPath: string | null = null
+let showAbort: AbortController | null = null
 
 function pushState() {
   win?.webview.rpc?.send.appStateUpdate(state)
@@ -106,7 +111,7 @@ async function initFromConfig() {
   }
 }
 
-async function streamPrebuilt(outputPath: string): Promise<void> {
+async function streamPrebuilt(outputPath: string, signal: AbortSignal): Promise<void> {
   const userConfig = await loadUserConfig()
   if (!userConfig?.streamTarget) {
     throw new MarqueeError('No playback device configured.')
@@ -123,33 +128,131 @@ async function streamPrebuilt(outputPath: string): Promise<void> {
 
   if (lightsClient) {
     appendLog(`Lights → dim (${dimPercent}%)`)
-    await lightsClient.dim(lightIds, dimPercent)
+    await Promise.race([lightsClient.dim(lightIds, dimPercent), Bun.sleep(8000)]).catch(
+      () => {}
+    )
+    appendLog('Lights dim done')
   }
 
-  updateCue('__lights-dim__', CueStatus.Done)
+  if (signal.aborted) {
+    appendLog('Aborting after lights dim')
+    if (lightsClient) {
+      mutate({ phase: ShowPhase.LightsOn })
+      await Promise.race([lightsClient.setNormal(lightIds), Bun.sleep(8000)]).catch(
+        () => {}
+      )
+    }
+    mutate({ busy: false, phase: ShowPhase.Idle })
+    return
+  }
 
-  mutate({
-    phase: ShowPhase.Playing,
-    screen: AppScreen.NowPlaying,
-    cues: state.cues.map(c =>
-      c.id !== '__lights-dim__' && c.id !== '__lights-off__'
-        ? { ...c, status: CueStatus.Active }
-        : c
-    )
-  })
-  appendLog('Playback started')
+  mutate({ phase: ShowPhase.Playing })
+  appendLog('Streaming to Apple TV…')
 
+  const initialCues = state.cues.map(c => ({ ...c, status: CueStatus.Pending }))
   const backend = getBackend(userConfig.streamTarget.type)
+  const totalDurationMs =
+    (await probeFileDuration(outputPath).catch(() => null)) ?? undefined
+
+  const videoCues = state.cues.filter(
+    c =>
+      c.id !== '__lights-dim__' &&
+      c.id !== '__lights-off__' &&
+      c.id !== '__play-content__'
+  )
+  const hasPerCueDurations = videoCues.every(
+    c => typeof c.durationMs === 'number' && c.durationMs > 0
+  )
+  let segOffset = 0
+  const cueTimeline =
+    hasPerCueDurations && videoCues.length > 0
+      ? videoCues.map(c => {
+          const startMs = segOffset
+          const endMs = segOffset + (c.durationMs ?? 0)
+          segOffset = endMs
+          return { id: c.id, label: c.label, startMs, endMs }
+        })
+      : totalDurationMs && videoCues.length > 0
+        ? (() => {
+            const perCue = totalDurationMs / videoCues.length
+            return videoCues.map((c, i) => ({
+              id: c.id,
+              label: c.label,
+              startMs: i * perCue,
+              endMs: (i + 1) * perCue
+            }))
+          })()
+        : []
+  const hasTimeline = cueTimeline.length > 0
+
+  let playbackStart = 0
+  let tickTimer: ReturnType<typeof setInterval> | null = null
+  const applyTick = (elapsed: number) => {
+    const activeCueLabel = hasTimeline
+      ? (cueTimeline.find(c => elapsed >= c.startMs && elapsed < c.endMs)?.label ?? null)
+      : (videoCues[0]?.label ?? null)
+    mutate({
+      playback: {
+        elapsedMs: elapsed,
+        durationMs: totalDurationMs ?? null,
+        cueName: activeCueLabel
+      },
+      ...(hasTimeline
+        ? {
+            cues: state.cues.map(c => {
+              const meta = cueTimeline.find(t => t.id === c.id)
+              if (!meta) {
+                return c
+              }
+              if (elapsed >= meta.endMs) {
+                return { ...c, status: CueStatus.Done }
+              }
+              if (elapsed >= meta.startMs) {
+                return { ...c, status: CueStatus.Active }
+              }
+              return c
+            })
+          }
+        : {
+            cues: state.cues.map(c =>
+              c.id === videoCues[0]?.id ? { ...c, status: CueStatus.Active } : c
+            )
+          })
+    })
+  }
+
   try {
-    await backend.play(outputPath, userConfig.streamTarget as never)
+    await backend.play(
+      outputPath,
+      userConfig.streamTarget as never,
+      signal,
+      totalDurationMs,
+      () => {
+        playbackStart = Date.now()
+        updateCue('__lights-dim__', CueStatus.Done)
+        applyTick(0)
+        tickTimer = setInterval(() => applyTick(Date.now() - playbackStart), 1000)
+      }
+    )
   } finally {
-    await clearSession()
+    if (tickTimer !== null) {
+      clearInterval(tickTimer)
+    }
+    mutate({ playback: { elapsedMs: 0, durationMs: null, cueName: null } })
+    await saveSession({ partial: false, outputPath, cues: initialCues, log: [] })
     mutate({ phase: ShowPhase.LightsOff, screen: AppScreen.ControlRoom })
     updateCue('__lights-off__', CueStatus.Active)
 
     if (lightsClient) {
       appendLog('Lights → 0%')
-      await lightsClient.dim(lightIds, 0)
+      await Promise.race([lightsClient.dim(lightIds, 0), Bun.sleep(8000)]).catch(() => {})
+      appendLog('Lights off done')
+    }
+
+    if (!signal.aborted) {
+      updateCue('__play-content__', CueStatus.Active)
+      appendLog('Resuming content')
+      await backend.resumePlayback?.(userConfig.streamTarget as never)
     }
 
     mutate({
@@ -162,7 +265,7 @@ async function streamPrebuilt(outputPath: string): Promise<void> {
   }
 }
 
-async function runShowSequence() {
+async function runShowSequence(signal: AbortSignal) {
   const userConfig = await loadUserConfig()
   if (!userConfig) {
     throw new MarqueeError('No config. Run setup first.')
@@ -181,7 +284,15 @@ async function runShowSequence() {
 
   if (lightsClient) {
     appendLog('Lights → bright')
-    await lightsClient.setNormal(lightIds)
+    await Promise.race([lightsClient.setNormal(lightIds), Bun.sleep(8000)]).catch(
+      () => {}
+    )
+    appendLog('Lights bright done')
+  }
+
+  if (signal.aborted) {
+    mutate({ busy: false, phase: ShowPhase.Idle })
+    return
   }
 
   mutate({ phase: ShowPhase.Building })
@@ -197,6 +308,7 @@ async function runShowSequence() {
         durationMs: c.durationMs ?? null,
         status: CueStatus.Pending
       }))
+      const needsResume = userConfig.streamTarget?.type === 'appletv'
       const mapped = lightsConfig
         ? [
             {
@@ -211,14 +323,41 @@ async function runShowSequence() {
               label: 'Lights → 0%',
               durationMs: null,
               status: CueStatus.Pending
-            }
+            },
+            ...(needsResume
+              ? [
+                  {
+                    id: '__play-content__',
+                    label: 'Play content',
+                    durationMs: null,
+                    status: CueStatus.Pending
+                  }
+                ]
+              : [])
           ]
-        : videoCues
+        : [
+            ...videoCues,
+            ...(needsResume
+              ? [
+                  {
+                    id: '__play-content__',
+                    label: 'Play content',
+                    durationMs: null,
+                    status: CueStatus.Pending
+                  }
+                ]
+              : [])
+          ]
 
       mutate({ cues: mapped })
       await saveSession({ partial: true, outputPath: '', cues: mapped, log: state.log })
     }
   })
+
+  if (signal.aborted) {
+    mutate({ busy: false, phase: ShowPhase.Idle, buildProgress: null })
+    return
+  }
 
   const videoCues = cues.map((c, i) => ({
     id: String(i),
@@ -241,9 +380,31 @@ async function runShowSequence() {
           label: 'Lights → 0%',
           durationMs: null,
           status: CueStatus.Pending
-        }
+        },
+        ...(userConfig.streamTarget?.type === 'appletv'
+          ? [
+              {
+                id: '__play-content__',
+                label: 'Play content',
+                durationMs: null,
+                status: CueStatus.Pending
+              }
+            ]
+          : [])
       ]
-    : videoCues
+    : [
+        ...videoCues,
+        ...(userConfig.streamTarget?.type === 'appletv'
+          ? [
+              {
+                id: '__play-content__',
+                label: 'Play content',
+                durationMs: null,
+                status: CueStatus.Pending
+              }
+            ]
+          : [])
+      ]
 
   mutate({ buildProgress: null, cues: finalCues })
   await saveSession({ partial: false, outputPath, cues: finalCues, log: state.log })
@@ -254,7 +415,7 @@ async function runShowSequence() {
     await waitForConfirm()
   }
 
-  await streamPrebuilt(outputPath)
+  await streamPrebuilt(outputPath, signal)
 }
 
 function waitForConfirm(): Promise<void> {
@@ -342,7 +503,10 @@ const rpc = defineElectrobunRPC<MarqueeRPC>('bun', {
         mutate({ restoredPartial: false })
         await clearSession()
 
-        runShowSequence().catch(e => {
+        showAbort = new AbortController()
+        const { signal } = showAbort
+
+        runShowSequence(signal).catch(e => {
           if ((e as Error).message === 'Cancelled') {
             return
           }
@@ -360,14 +524,19 @@ const rpc = defineElectrobunRPC<MarqueeRPC>('bun', {
           const outputPath = restoredOutputPath
           restoredOutputPath = null
 
+          showAbort = new AbortController()
+          const { signal } = showAbort
+
           mutate({ busy: true })
-          streamPrebuilt(outputPath).catch(e => {
+          streamPrebuilt(outputPath, signal).catch(e => {
             mutate({ busy: false, error: (e as Error).message, phase: ShowPhase.Error })
           })
         }
       },
 
       cancelShow: async () => {
+        showAbort?.abort()
+        showAbort = null
         confirmReject?.(new MarqueeError('Cancelled'))
         confirmResolve = null
         confirmReject = null
@@ -411,6 +580,104 @@ const rpc = defineElectrobunRPC<MarqueeRPC>('bun', {
         await clearSession()
         restoredOutputPath = null
         mutate({ cues: [], phase: ShowPhase.Idle, error: null, restoredPartial: false })
+      },
+
+      devStart: async () => {
+        if (state.busy) {
+          return
+        }
+
+        const files = await readdir(NORM_CACHE_DIR).catch(() => [])
+        const mp4s = files.filter(f => f.endsWith('.mp4'))
+        if (mp4s.length === 0) {
+          mutate({ error: 'No cached segments found. Run a full build first.' })
+          return
+        }
+
+        const withMtime = await Promise.all(
+          mp4s.map(async f => {
+            const fullPath = join(NORM_CACHE_DIR, f)
+            const s = await stat(fullPath)
+            return { path: fullPath, mtime: s.mtimeMs }
+          })
+        )
+        withMtime.sort((a, b) => b.mtime - a.mtime)
+        const segPaths = withMtime.map(w => w.path)
+
+        const durations = await Promise.all(
+          segPaths.map(p => probeFileDuration(p).catch(() => null))
+        )
+
+        const devTmpDir = join(tmpdir(), `marquee-dev-${Date.now()}`)
+        await mkdir(devTmpDir, { recursive: true })
+        await mkdir(OUTPUT_DIR, { recursive: true })
+        const outputPath = join(OUTPUT_DIR, `marquee-dev-${Date.now()}.mp4`)
+
+        mutate({ busy: true, error: null, phase: ShowPhase.Building, cues: [] })
+        appendLog(`Dev: concatenating ${segPaths.length} cached segment(s)…`)
+        await concatSegments(segPaths, devTmpDir, outputPath)
+
+        const videoCues = segPaths.map((p, i) => ({
+          id: String(i),
+          label: basename(p, '.mp4').replace(/_[0-9a-f]+$/, ''),
+          durationMs: durations[i] ?? null,
+          status: CueStatus.Pending
+        }))
+
+        const userConfig = await loadUserConfig()
+        const lightsConfig = userConfig?.lights
+        const dimPercent = lightsConfig?.dimPercent ?? 30
+        const needsResume = userConfig?.streamTarget?.type === 'appletv'
+        const finalCues = lightsConfig
+          ? [
+              {
+                id: '__lights-dim__',
+                label: `Lights → ${dimPercent}%`,
+                durationMs: null,
+                status: CueStatus.Pending
+              },
+              ...videoCues,
+              {
+                id: '__lights-off__',
+                label: 'Lights → 0%',
+                durationMs: null,
+                status: CueStatus.Pending
+              },
+              ...(needsResume
+                ? [
+                    {
+                      id: '__play-content__',
+                      label: 'Play content',
+                      durationMs: null,
+                      status: CueStatus.Pending
+                    }
+                  ]
+                : [])
+            ]
+          : [
+              ...videoCues,
+              ...(needsResume
+                ? [
+                    {
+                      id: '__play-content__',
+                      label: 'Play content',
+                      durationMs: null,
+                      status: CueStatus.Pending
+                    }
+                  ]
+                : [])
+            ]
+
+        showAbort = new AbortController()
+        const { signal } = showAbort
+
+        mutate({ phase: ShowPhase.LightsOn, cues: finalCues })
+        streamPrebuilt(outputPath, signal).catch(e => {
+          if ((e as Error).message === 'Cancelled') {
+            return
+          }
+          mutate({ busy: false, error: (e as Error).message, phase: ShowPhase.Error })
+        })
       },
 
       streamFile: async ({ filePath }) => {

@@ -21,6 +21,7 @@ export interface AssembleInput {
 
 export interface AssembleResult {
   outputPath: string
+  segmentDurations: (number | null)[]
 }
 
 const HW_ENCODERS = ['h264_videotoolbox', 'h264_nvenc', 'h264_qsv', 'h264_amf']
@@ -31,6 +32,26 @@ interface VideoEncoder {
 }
 
 let cachedEncoder: VideoEncoder | null = null
+
+async function probeSegmentDuration(
+  ffprobePath: string,
+  filePath: string
+): Promise<number | null> {
+  const result = await exec(
+    [ffprobePath, '-v', 'quiet', '-print_format', 'json', '-show_format', filePath],
+    { captureOutput: true, silent: true }
+  )
+  if (result.exitCode !== 0) {
+    return null
+  }
+  try {
+    const json = JSON.parse(result.stdout) as { format?: { duration?: string } }
+    const seconds = parseFloat(json.format?.duration ?? '')
+    return isNaN(seconds) ? null : seconds * 1000
+  } catch {
+    return null
+  }
+}
 
 async function pickVideoEncoder(ffmpegPath: string): Promise<VideoEncoder> {
   if (cachedEncoder) {
@@ -142,6 +163,10 @@ export async function assemblePreshow(input: AssembleInput): Promise<AssembleRes
   const concatFile = join(input.tmpDir, 'concat.txt')
   await writeFile(concatFile, concatList)
 
+  const segmentDurations = await Promise.all(
+    normalized.map(f => probeSegmentDuration(bins.ffprobe, f))
+  )
+
   const outputPath = join(input.outputDir, `marquee-${Date.now()}.mp4`)
 
   await new Promise<void>((resolve, reject) => {
@@ -157,5 +182,31 @@ export async function assemblePreshow(input: AssembleInput): Promise<AssembleRes
       .run()
   })
 
-  return { outputPath }
+  return { outputPath, segmentDurations }
+}
+
+export async function concatSegments(
+  files: string[],
+  tmpDir: string,
+  outputPath: string
+): Promise<void> {
+  const bins = await resolveBinaries()
+  ffmpeg.setFfmpegPath(bins.ffmpeg)
+
+  const concatList = files.map(f => `file '${f.replace(/'/g, "'\\''")}'`).join('\n')
+  const concatFile = join(tmpDir, 'concat.txt')
+  await writeFile(concatFile, concatList)
+
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg()
+      .input(concatFile)
+      .inputOptions(['-f concat', '-safe 0'])
+      .outputOptions(['-c copy', '-movflags +faststart'])
+      .output(outputPath)
+      .on('end', () => resolve())
+      .on('error', (err: Error) =>
+        reject(new MarqueeError(`ffmpeg concat failed: ${err.message}`))
+      )
+      .run()
+  })
 }

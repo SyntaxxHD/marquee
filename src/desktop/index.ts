@@ -258,10 +258,13 @@ async function streamPrebuilt(outputPath: string, signal: AbortSignal): Promise<
     mutate({
       phase: ShowPhase.Done,
       busy: false,
-      cues: state.cues.map(c => ({ ...c, status: CueStatus.Done }))
+      cues: state.cues.map(c => ({
+        ...c,
+        status: c.id === '__play-content__' ? CueStatus.Active : CueStatus.Done
+      }))
     })
 
-    setTimeout(() => mutate({ phase: ShowPhase.Idle, cues: [] }), 3000)
+    setTimeout(() => mutate({ phase: ShowPhase.Idle }), 3000)
   }
 }
 
@@ -298,7 +301,7 @@ async function runShowSequence(signal: AbortSignal) {
   mutate({ phase: ShowPhase.Building })
   appendLog('Building pre-show…')
 
-  const { outputPath, cues } = await runBuild({
+  const { outputPath, cues } = await runBuild(signal, {
     onLog: message => appendLog(message),
     onProgress: progress => mutate({ buildProgress: progress }),
     onDownloadsComplete: async partialCues => {

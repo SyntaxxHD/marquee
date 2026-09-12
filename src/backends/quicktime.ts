@@ -26,6 +26,6 @@ export const quickTimeBackend: StreamingBackend<QuickTimeConfig> = {
     if (signal?.aborted) {
       return
     }
-    await playInQuickTime(filePath, config.deviceName)
+    await playInQuickTime(filePath, config.deviceName, signal)
   }
 }

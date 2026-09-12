@@ -15,6 +15,7 @@ export interface AssembleInput {
   normCacheDir: string
   resolution: OutputResolution
   fps: OutputFps
+  signal?: AbortSignal
   onSegmentStart?: (index: number, total: number) => void
   onSegmentProgress?: (percent: number) => void
 }
@@ -83,10 +84,15 @@ function normalizeSegment(
   height: number,
   fps: OutputFps,
   encoder: VideoEncoder,
-  onProgress?: (percent: number) => void
+  onProgress?: (percent: number) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   const is4K = width >= 3840
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Cancelled'))
+      return
+    }
     const command = ffmpeg(input)
       .videoFilters([
         `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
@@ -113,10 +119,16 @@ function normalizeSegment(
       .output(output)
       .on('progress', ({ percent }: { percent?: number }) => onProgress?.(percent ?? 0))
       .on('end', () => resolve())
-      .on('error', (err: Error) =>
-        reject(new MarqueeError(`ffmpeg normalize failed: ${err.message}`))
-      )
+      .on('error', (err: Error) => {
+        if (signal?.aborted) {
+          reject(new Error('Cancelled'))
+        } else {
+          reject(new MarqueeError(`ffmpeg normalize failed: ${err.message}`))
+        }
+      })
       .run()
+
+    signal?.addEventListener('abort', () => command.kill('SIGKILL'), { once: true })
   })
 }
 
@@ -153,7 +165,8 @@ export async function assemblePreshow(input: AssembleInput): Promise<AssembleRes
       height,
       input.fps,
       encoder,
-      input.onSegmentProgress
+      input.onSegmentProgress,
+      input.signal
     )
 
     normalized.push(cachedPath)
@@ -170,16 +183,25 @@ export async function assemblePreshow(input: AssembleInput): Promise<AssembleRes
   const outputPath = join(input.outputDir, `marquee-${Date.now()}.mp4`)
 
   await new Promise<void>((resolve, reject) => {
-    ffmpeg()
+    if (input.signal?.aborted) {
+      reject(new Error('Cancelled'))
+      return
+    }
+    const command = ffmpeg()
       .input(concatFile)
       .inputOptions(['-f concat', '-safe 0'])
       .outputOptions(['-c copy', '-movflags +faststart'])
       .output(outputPath)
       .on('end', () => resolve())
-      .on('error', (err: Error) =>
-        reject(new MarqueeError(`ffmpeg concat failed: ${err.message}`))
-      )
-      .run()
+      .on('error', (err: Error) => {
+        if (input.signal?.aborted) {
+          reject(new Error('Cancelled'))
+        } else {
+          reject(new MarqueeError(`ffmpeg concat failed: ${err.message}`))
+        }
+      })
+    input.signal?.addEventListener('abort', () => command.kill('SIGKILL'), { once: true })
+    command.run()
   })
 
   return { outputPath, segmentDurations }
@@ -188,7 +210,8 @@ export async function assemblePreshow(input: AssembleInput): Promise<AssembleRes
 export async function concatSegments(
   files: string[],
   tmpDir: string,
-  outputPath: string
+  outputPath: string,
+  signal?: AbortSignal
 ): Promise<void> {
   const bins = await resolveBinaries()
   ffmpeg.setFfmpegPath(bins.ffmpeg)
@@ -198,15 +221,24 @@ export async function concatSegments(
   await writeFile(concatFile, concatList)
 
   await new Promise<void>((resolve, reject) => {
-    ffmpeg()
+    if (signal?.aborted) {
+      reject(new Error('Cancelled'))
+      return
+    }
+    const command = ffmpeg()
       .input(concatFile)
       .inputOptions(['-f concat', '-safe 0'])
       .outputOptions(['-c copy', '-movflags +faststart'])
       .output(outputPath)
       .on('end', () => resolve())
-      .on('error', (err: Error) =>
-        reject(new MarqueeError(`ffmpeg concat failed: ${err.message}`))
-      )
-      .run()
+      .on('error', (err: Error) => {
+        if (signal?.aborted) {
+          reject(new Error('Cancelled'))
+        } else {
+          reject(new MarqueeError(`ffmpeg concat failed: ${err.message}`))
+        }
+      })
+    signal?.addEventListener('abort', () => command.kill('SIGKILL'), { once: true })
+    command.run()
   })
 }

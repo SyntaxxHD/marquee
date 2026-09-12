@@ -35,6 +35,31 @@
   }
 
   async function finish() {
+    if (activeSection === Section.Content && contentCanContinue) {
+      await rpc.request.saveConfigFields({
+        fields: {
+          tmdbApiKey: tmdbKey,
+          trailerSource,
+          trailerSelectionMode,
+          trailerCount,
+          trailerTargetDurationMin,
+          trailerMaxVideoLengthMin: trailerMaxVideoLengthMin <= 0 ? null : trailerMaxVideoLengthMin,
+          trailersDir,
+          adSource,
+          adSelectionMode,
+          adCount,
+          adTargetDurationMin,
+          adMaxVideoLengthMin: adMaxVideoLengthMin <= 0 ? null : adMaxVideoLengthMin,
+          adsDir,
+          language,
+          adsLanguage
+        }
+      })
+    } else if (activeSection === Section.Output) {
+      await rpc.request.saveConfigFields({ fields: { outputResolution, outputFps } })
+    } else if (activeSection === Section.Lights && hueStep === HueStep.Done) {
+      await saveHue()
+    }
     await rpc.request.navigateTo({ screen: AppScreen.ControlRoom })
   }
 

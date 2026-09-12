@@ -1,5 +1,5 @@
 import { MarqueeError } from '../utils/errors.ts'
-import { execOrThrow, exec } from '../utils/exec.ts'
+import { exec } from '../utils/exec.ts'
 
 function escapeAppleScriptPath(p: string): string {
   return p.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
@@ -44,7 +44,8 @@ export async function listAirPlayDevices(): Promise<string[]> {
 
 export async function playInQuickTime(
   filePath: string,
-  deviceName: string
+  deviceName: string,
+  signal?: AbortSignal
 ): Promise<void> {
   const result = await exec(['which', 'osascript'], { silent: true })
   if (result.exitCode !== 0) {
@@ -91,7 +92,27 @@ export async function playInQuickTime(
       quit
     end tell
   `
-  await execOrThrow(['osascript', '-e', waitAndQuit], {
-    errorMessage: 'Failed waiting for QuickTime playback to finish'
+
+  const proc = Bun.spawn(['osascript', '-e', waitAndQuit], {
+    stdin: 'ignore',
+    stdout: 'inherit',
+    stderr: 'inherit'
   })
+
+  const onAbort = () => {
+    proc.kill()
+    osascript('tell application "QuickTime Player" to quit').catch(() => {})
+  }
+
+  signal?.addEventListener('abort', onAbort, { once: true })
+  await proc.exited
+  signal?.removeEventListener('abort', onAbort)
+
+  if (signal?.aborted) {
+    throw new Error('Cancelled')
+  }
+
+  if ((proc.exitCode ?? 1) !== 0) {
+    throw new MarqueeError('Failed waiting for QuickTime playback to finish')
+  }
 }

@@ -27,7 +27,22 @@ export interface BuildCallbacks {
   onDownloadsComplete?: (cues: BuildCue[]) => Promise<void>
 }
 
-export async function runBuild(callbacks?: BuildCallbacks): Promise<BuildResult> {
+function computeGrandTotal(
+  adCount: number,
+  trailerCount: number,
+  adSourceAuto: boolean,
+  trailerSourceAuto: boolean
+): number {
+  const downloadCount =
+    (adSourceAuto ? adCount : 0) + (trailerSourceAuto ? trailerCount : 0)
+  const normalizeCount = adCount + trailerCount
+  return downloadCount + normalizeCount
+}
+
+export async function runBuild(
+  signal?: AbortSignal,
+  callbacks?: BuildCallbacks
+): Promise<BuildResult> {
   const config = await loadConfig()
 
   const adOptions: VideoSelectionOptions = {
@@ -47,20 +62,26 @@ export async function runBuild(callbacks?: BuildCallbacks): Promise<BuildResult>
         : null
   }
 
-  const estimatedAdCount =
-    config.adSelectionMode === 'duration'
-      ? Math.ceil(adOptions.targetMs / 60_000)
-      : config.adCount
-  const estimatedTrailerCount =
-    config.trailerSelectionMode === 'duration'
-      ? Math.ceil(trailerOptions.targetMs / 150_000)
-      : config.trailerCount
+  let localAds: AdResult[] | null = null
+  let localTrailerItems: { filePath: string; title: string }[] | null = null
 
-  const downloadCount =
-    (config.adSource === 'auto' ? estimatedAdCount : 0) +
-    (config.trailerSource === 'auto' ? estimatedTrailerCount : 0)
-  const normalizeCount = estimatedAdCount + estimatedTrailerCount
-  const grandTotal = downloadCount + normalizeCount
+  if (config.adSource === 'local') {
+    localAds = await pickAds(config.adsDir, adOptions)
+  }
+  if (config.trailerSource === 'local') {
+    localTrailerItems = (
+      await pickLocalVideos(config.trailersDir, trailerOptions, 'trailer videos')
+    ).map(t => ({ filePath: t.filePath, title: t.title }))
+  }
+
+  let adCount = localAds ? localAds.length : config.adCount
+  let trailerCount = localTrailerItems ? localTrailerItems.length : config.trailerCount
+  let grandTotal = computeGrandTotal(
+    adCount,
+    trailerCount,
+    config.adSource === 'auto',
+    config.trailerSource === 'auto'
+  )
 
   let ads: AdResult[]
   if (config.adSource === 'auto') {
@@ -69,9 +90,20 @@ export async function runBuild(callbacks?: BuildCallbacks): Promise<BuildResult>
     callbacks?.onLog?.(`Fetching ads…`)
     let currentAdIndex = 0
     let currentAdLabel = ''
+    let lastAdPercent = 0
     ads = await adService.fetchAds(
       adOptions,
+      count => {
+        adCount = count
+        grandTotal = computeGrandTotal(
+          adCount,
+          trailerCount,
+          config.adSource === 'auto',
+          config.trailerSource === 'auto'
+        )
+      },
       (index, title) => {
+        lastAdPercent = 0
         currentAdIndex = index
         currentAdLabel = `Ad ${index + 1}: ${title}`
         callbacks?.onLog?.(`Downloading ad ${index + 1}: ${title}`)
@@ -82,16 +114,22 @@ export async function runBuild(callbacks?: BuildCallbacks): Promise<BuildResult>
           itemPercent: 0
         })
       },
-      percent =>
+      percent => {
+        if (percent <= lastAdPercent) {
+          return
+        }
+        lastAdPercent = percent
         callbacks?.onProgress?.({
           label: currentAdLabel,
           itemIndex: currentAdIndex,
           itemTotal: grandTotal,
           itemPercent: percent
         })
+      },
+      signal
     )
   } else {
-    ads = await pickAds(config.adsDir, adOptions)
+    ads = localAds!
   }
 
   let trailerItems: { filePath: string; title: string }[]
@@ -105,36 +143,48 @@ export async function runBuild(callbacks?: BuildCallbacks): Promise<BuildResult>
     callbacks?.onLog?.(`Fetching trailers…`)
     let currentTrailerIndex = 0
     let currentTrailerLabel = ''
+    let lastTrailerPercent = 0
     trailerItems = (
       await trailerService.fetchTrailers(
         trailerOptions,
+        count => {
+          trailerCount = count
+          grandTotal = computeGrandTotal(
+            adCount,
+            trailerCount,
+            config.adSource === 'auto',
+            config.trailerSource === 'auto'
+          )
+        },
         (index, title) => {
+          lastTrailerPercent = 0
           currentTrailerIndex = index
           currentTrailerLabel = `Trailer ${index + 1}: ${title}`
           callbacks?.onLog?.(`Downloading trailer ${index + 1}: ${title}`)
           callbacks?.onProgress?.({
             label: currentTrailerLabel,
-            itemIndex: estimatedAdCount + index,
+            itemIndex: adCount + index,
             itemTotal: grandTotal,
             itemPercent: 0
           })
         },
-        percent =>
+        percent => {
+          if (percent <= lastTrailerPercent) {
+            return
+          }
+          lastTrailerPercent = percent
           callbacks?.onProgress?.({
             label: currentTrailerLabel,
-            itemIndex: estimatedAdCount + currentTrailerIndex,
+            itemIndex: adCount + currentTrailerIndex,
             itemTotal: grandTotal,
             itemPercent: percent
           })
+        },
+        signal
       )
     ).map(t => ({ filePath: t.filePath, title: t.title }))
   } else {
-    const picked = await pickLocalVideos(
-      config.trailersDir,
-      trailerOptions,
-      'trailer videos'
-    )
-    trailerItems = picked.map(t => ({ filePath: t.filePath, title: t.title }))
+    trailerItems = localTrailerItems!
   }
 
   const files = [...ads.map(a => a.filePath), ...trailerItems.map(t => t.filePath)]
@@ -148,6 +198,10 @@ export async function runBuild(callbacks?: BuildCallbacks): Promise<BuildResult>
   const tmpDir = join(tmpdir(), `marquee-${Date.now()}`)
   setActiveTmpDir(tmpDir)
 
+  const downloadCount =
+    (config.adSource === 'auto' ? adCount : 0) +
+    (config.trailerSource === 'auto' ? trailerCount : 0)
+
   callbacks?.onLog?.(`Normalizing ${files.length} segments…`)
   let currentSegmentIndex = 0
   let currentSegmentLabel = ''
@@ -158,6 +212,7 @@ export async function runBuild(callbacks?: BuildCallbacks): Promise<BuildResult>
     normCacheDir: NORM_CACHE_DIR,
     resolution: config.outputResolution,
     fps: config.outputFps,
+    signal,
     onSegmentStart: (index, total) => {
       currentSegmentIndex = downloadCount + index
       currentSegmentLabel = `Normalizing ${index + 1} / ${total}`

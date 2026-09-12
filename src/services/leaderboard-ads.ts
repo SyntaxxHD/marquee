@@ -2,7 +2,7 @@ import { join } from 'path'
 
 import { TrailerCache } from '../utils/cache.ts'
 import { MarqueeError } from '../utils/errors.ts'
-import { downloadVideo } from '../utils/ytdlp.ts'
+import { downloadVideo, getVideoInfo } from '../utils/ytdlp.ts'
 
 import type { AdResult, VideoSelectionOptions } from './ads.ts'
 import { probeFileDuration } from './player.ts'
@@ -81,12 +81,23 @@ export class LeaderboardAdService {
 
   async fetchAds(
     options: VideoSelectionOptions,
+    onPlanReady?: (count: number) => void,
     onItemStart?: (index: number, title: string) => void,
-    onItemProgress?: (percent: number) => void
+    onItemProgress?: (percent: number) => void,
+    signal?: AbortSignal
   ): Promise<AdResult[]> {
+    if (options.selectionMode === 'duration') {
+      return this.fetchAdsByDuration(
+        options,
+        onPlanReady,
+        onItemStart,
+        onItemProgress,
+        signal
+      )
+    }
+
     const videos = await this.fetchLeaderboard()
     const results: AdResult[] = []
-    let totalDurationMs = 0
     let skipped = 0
     const skipLimit = Math.max(options.count, 10)
 
@@ -94,18 +105,12 @@ export class LeaderboardAdService {
       if (skipped >= skipLimit) {
         break
       }
-
-      const done =
-        options.selectionMode === 'duration'
-          ? totalDurationMs >= options.targetMs
-          : results.length >= options.count
-      if (done) {
+      if (results.length >= options.count) {
         break
       }
-
       try {
         onItemStart?.(results.length, video.video_title)
-        const result = await this.getOrDownload(video, onItemProgress)
+        const result = await this.getOrDownload(video, onItemProgress, signal)
         const duration = await probeFileDuration(result.filePath)
 
         if (
@@ -118,7 +123,6 @@ export class LeaderboardAdService {
         }
 
         results.push(result)
-        totalDurationMs += duration ?? 0
       } catch (err) {
         skipped++
         console.warn(
@@ -127,14 +131,78 @@ export class LeaderboardAdService {
       }
     }
 
-    if (options.selectionMode === 'count' && results.length < options.count) {
+    if (results.length < options.count) {
       throw new MarqueeError(
         `Could only fetch ${results.length} of ${options.count} ads. Try again later.`
       )
     }
 
-    if (options.selectionMode === 'duration' && results.length === 0) {
-      throw new MarqueeError(`Could not fetch any ads. Try again later.`)
+    return results
+  }
+
+  private async fetchAdsByDuration(
+    options: VideoSelectionOptions,
+    onPlanReady?: (count: number) => void,
+    onItemStart?: (index: number, title: string) => void,
+    onItemProgress?: (percent: number) => void,
+    signal?: AbortSignal
+  ): Promise<AdResult[]> {
+    const videos = await this.fetchLeaderboard()
+
+    interface PlannedAd {
+      video: LeaderboardVideo
+      cachedPath: string | null
+      durationMs: number
+    }
+
+    const planned: PlannedAd[] = []
+    let totalMs = 0
+
+    for (const video of shuffle(videos)) {
+      if (totalMs >= options.targetMs) {
+        break
+      }
+
+      const cachedPath = await this.cache.get(video.video_id)
+      let durationMs: number | null
+
+      if (cachedPath) {
+        durationMs = await probeFileDuration(cachedPath)
+      } else {
+        const info = await getVideoInfo(video.video_id)
+        durationMs = info?.durationMs ?? null
+      }
+
+      if (durationMs === null) {
+        continue
+      }
+      if (options.maxLengthMs !== null && durationMs > options.maxLengthMs) {
+        continue
+      }
+
+      planned.push({ video, cachedPath, durationMs })
+      totalMs += durationMs
+    }
+
+    if (planned.length === 0) {
+      throw new MarqueeError(
+        `Could not find any ads matching the filter. Try again later.`
+      )
+    }
+
+    onPlanReady?.(planned.length)
+
+    const results: AdResult[] = []
+    for (const item of planned) {
+      onItemStart?.(results.length, item.video.video_title)
+      const result = item.cachedPath
+        ? {
+            filePath: item.cachedPath,
+            fileName: `${item.video.video_id}.mp4`,
+            title: item.video.video_title
+          }
+        : await this.getOrDownload(item.video, onItemProgress, signal)
+      results.push(result)
     }
 
     return results
@@ -199,7 +267,8 @@ export class LeaderboardAdService {
 
   private async getOrDownload(
     video: LeaderboardVideo,
-    onProgress?: (percent: number) => void
+    onProgress?: (percent: number) => void,
+    signal?: AbortSignal
   ): Promise<AdResult> {
     const fileName = `${video.video_id}.mp4`
     const cached = await this.cache.get(video.video_id)
@@ -208,7 +277,7 @@ export class LeaderboardAdService {
     }
 
     const outputPath = join(this.cache['cacheDir'], fileName)
-    await downloadVideo(video.video_id, outputPath, onProgress)
+    await downloadVideo(video.video_id, outputPath, onProgress, signal)
 
     if (!(await Bun.file(outputPath).exists())) {
       throw new Error('Download completed but output file not found')

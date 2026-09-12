@@ -57,7 +57,7 @@
     pointer-events: none;
     opacity: 0;
     transition: opacity var(--transition-fast);
-    z-index: 10;
+    z-index: 9000;
   }
 
   .icon-btn:not(:disabled):hover::after {

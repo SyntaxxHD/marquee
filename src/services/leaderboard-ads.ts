@@ -4,7 +4,8 @@ import { TrailerCache } from '../utils/cache.ts'
 import { MarqueeError } from '../utils/errors.ts'
 import { downloadVideo } from '../utils/ytdlp.ts'
 
-import type { AdResult } from './ads.ts'
+import type { AdResult, VideoSelectionOptions } from './ads.ts'
+import { probeFileDuration } from './player.ts'
 
 const LEADERBOARD_HEADERS = {
   'User-Agent':
@@ -79,25 +80,45 @@ export class LeaderboardAdService {
   }
 
   async fetchAds(
-    count: number,
+    options: VideoSelectionOptions,
     onItemStart?: (index: number, title: string) => void,
     onItemProgress?: (percent: number) => void
   ): Promise<AdResult[]> {
     const videos = await this.fetchLeaderboard()
     const results: AdResult[] = []
+    let totalDurationMs = 0
     let skipped = 0
+    const skipLimit = Math.max(options.count, 10)
 
     for (const video of shuffle(videos)) {
-      if (results.length >= count) {
+      if (skipped >= skipLimit) {
         break
       }
-      if (skipped >= count) {
+
+      const done =
+        options.selectionMode === 'duration'
+          ? totalDurationMs >= options.targetMs
+          : results.length >= options.count
+      if (done) {
         break
       }
+
       try {
         onItemStart?.(results.length, video.video_title)
         const result = await this.getOrDownload(video, onItemProgress)
+        const duration = await probeFileDuration(result.filePath)
+
+        if (
+          options.maxLengthMs !== null &&
+          duration !== null &&
+          duration > options.maxLengthMs
+        ) {
+          skipped++
+          continue
+        }
+
         results.push(result)
+        totalDurationMs += duration ?? 0
       } catch (err) {
         skipped++
         console.warn(
@@ -106,10 +127,14 @@ export class LeaderboardAdService {
       }
     }
 
-    if (results.length < count) {
+    if (options.selectionMode === 'count' && results.length < options.count) {
       throw new MarqueeError(
-        `Could only fetch ${results.length} of ${count} ads. Try again later.`
+        `Could only fetch ${results.length} of ${options.count} ads. Try again later.`
       )
+    }
+
+    if (options.selectionMode === 'duration' && results.length === 0) {
+      throw new MarqueeError(`Could not fetch any ads. Try again later.`)
     }
 
     return results

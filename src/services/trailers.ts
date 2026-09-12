@@ -4,6 +4,8 @@ import { TrailerCache } from '../utils/cache.ts'
 import { MarqueeError } from '../utils/errors.ts'
 import { downloadVideo } from '../utils/ytdlp.ts'
 
+import type { VideoSelectionOptions } from './ads.ts'
+import { probeFileDuration } from './player.ts'
 import { TmdbClient } from './tmdb.ts'
 
 export interface TrailerResult {
@@ -27,15 +29,20 @@ export class TrailerService {
   }
 
   async fetchTrailers(
-    count: number,
+    options: VideoSelectionOptions,
     onItemStart?: (index: number, title: string) => void,
     onItemProgress?: (percent: number) => void
   ): Promise<TrailerResult[]> {
     const movies = await this.tmdb.getTrendingMovies()
     const results: TrailerResult[] = []
+    let totalDurationMs = 0
 
     for (const movie of movies) {
-      if (results.length >= count) {
+      const done =
+        options.selectionMode === 'duration'
+          ? totalDurationMs >= options.targetMs
+          : results.length >= options.count
+      if (done) {
         break
       }
 
@@ -47,16 +54,31 @@ export class TrailerService {
       try {
         onItemStart?.(results.length, movie.title)
         const result = await this.getOrDownload(youtubeId, movie.title, onItemProgress)
+        const duration = await probeFileDuration(result.filePath)
+
+        if (
+          options.maxLengthMs !== null &&
+          duration !== null &&
+          duration > options.maxLengthMs
+        ) {
+          continue
+        }
+
         results.push(result)
+        totalDurationMs += duration ?? 0
       } catch (err) {
         console.warn(`Skipping "${movie.title}": ${(err as Error).message}`)
       }
     }
 
-    if (results.length < count) {
+    if (options.selectionMode === 'count' && results.length < options.count) {
       throw new MarqueeError(
-        `Could only find ${results.length} of ${count} trailers. Try again later.`
+        `Could only find ${results.length} of ${options.count} trailers. Try again later.`
       )
+    }
+
+    if (options.selectionMode === 'duration' && results.length === 0) {
+      throw new MarqueeError(`Could not fetch any trailers. Try again later.`)
     }
 
     return results

@@ -11,15 +11,22 @@ export type OutputResolution = '1920x1080' | '3840x2160'
 export type OutputFps = 25 | 30 | 60
 export type AdSource = 'auto' | 'local'
 export type TrailerSource = 'auto' | 'local'
+export type SelectionMode = 'count' | 'duration'
 
 export interface UserConfig {
   tmdbApiKey: string
   adSource: AdSource
   adsDir: string
   adCount: number
+  adSelectionMode: SelectionMode
+  adTargetDurationMin: number
+  adMaxVideoLengthMin: number | null
   trailerSource: TrailerSource
   trailersDir: string
   trailerCount: number
+  trailerSelectionMode: SelectionMode
+  trailerTargetDurationMin: number
+  trailerMaxVideoLengthMin: number | null
   streamTarget: StreamTargetConfig | null
   language: string
   adsLanguage: string
@@ -33,9 +40,15 @@ export interface Config {
   adSource: AdSource
   adsDir: string
   adCount: number
+  adSelectionMode: SelectionMode
+  adTargetDurationMin: number
+  adMaxVideoLengthMin: number | null
   trailerSource: TrailerSource
   trailersDir: string
   trailerCount: number
+  trailerSelectionMode: SelectionMode
+  trailerTargetDurationMin: number
+  trailerMaxVideoLengthMin: number | null
   cacheDir: string
   adsCacheDir: string
   streamTarget: StreamTargetConfig | null
@@ -124,9 +137,19 @@ export async function loadConfig(): Promise<Config> {
     adSource,
     adsDir,
     adCount: userConfig.adCount ?? 4,
+    adSelectionMode: userConfig.adSelectionMode ?? 'count',
+    adTargetDurationMin: userConfig.adTargetDurationMin ?? 5,
+    adMaxVideoLengthMin:
+      userConfig.adMaxVideoLengthMin !== undefined ? userConfig.adMaxVideoLengthMin : 1,
     trailerSource,
     trailersDir,
     trailerCount: userConfig.trailerCount ?? 3,
+    trailerSelectionMode: userConfig.trailerSelectionMode ?? 'count',
+    trailerTargetDurationMin: userConfig.trailerTargetDurationMin ?? 10,
+    trailerMaxVideoLengthMin:
+      userConfig.trailerMaxVideoLengthMin !== undefined
+        ? userConfig.trailerMaxVideoLengthMin
+        : null,
     cacheDir: CACHE_DIR,
     adsCacheDir: ADS_CACHE_DIR,
     streamTarget: userConfig.streamTarget,

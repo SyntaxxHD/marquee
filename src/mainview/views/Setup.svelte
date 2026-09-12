@@ -26,10 +26,6 @@
     [Section.Lights]: SectionState.Pending
   })
 
-  function sectionDone(s: Section) {
-    return sectionStates[s] === SectionState.Done
-  }
-
   function setSection(s: Section) {
     activeSection = s
   }
@@ -38,12 +34,7 @@
     sectionStates[s] = SectionState.Done
   }
 
-  let canFinish = $derived(
-    sectionDone(Section.Playback) && sectionDone(Section.Content) && sectionDone(Section.Output)
-  )
-
   async function finish() {
-    await rpc.request.loadConfig()
     await rpc.request.navigateTo({ screen: AppScreen.ControlRoom })
   }
 
@@ -65,10 +56,16 @@
       tmdbKey = config.tmdbApiKey ?? ''
       tmdbValid = config.tmdbApiKey ? true : null
       trailerSource = config.trailerSource ?? 'auto'
+      trailerSelectionMode = config.trailerSelectionMode ?? 'count'
       trailerCount = config.trailerCount ?? 3
+      trailerTargetDurationMin = config.trailerTargetDurationMin ?? 10
+      trailerMaxVideoLengthMin = config.trailerMaxVideoLengthMin ?? 0
       trailersDir = config.trailersDir ?? ''
       adSource = config.adSource ?? 'local'
+      adSelectionMode = config.adSelectionMode ?? 'count'
       adCount = config.adCount ?? 4
+      adTargetDurationMin = config.adTargetDurationMin ?? 5
+      adMaxVideoLengthMin = config.adMaxVideoLengthMin ?? 1
       adsDir = config.adsDir ?? ''
       language = config.language ?? 'en-US'
       adsLanguage = config.adsLanguage ?? 'en-US'
@@ -185,10 +182,16 @@
   let tmdbValid = $state<boolean | null>(null)
   let tmdbValidating = $state(false)
   let trailerSource = $state<TrailerSource>('auto')
+  let trailerSelectionMode = $state<'count' | 'duration'>('count')
   let trailerCount = $state(3)
+  let trailerTargetDurationMin = $state(10)
+  let trailerMaxVideoLengthMin = $state(0)
   let trailersDir = $state('')
   let adSource = $state<AdSource>('local')
+  let adSelectionMode = $state<'count' | 'duration'>('count')
   let adCount = $state(4)
+  let adTargetDurationMin = $state(5)
+  let adMaxVideoLengthMin = $state(1)
   let adsDir = $state('')
   let language = $state('en-US')
   let adsLanguage = $state('en-US')
@@ -213,7 +216,23 @@
 
   async function saveContent() {
     await rpc.request.saveConfigFields({
-      fields: { tmdbApiKey: tmdbKey, trailerSource, trailerCount, trailersDir, adSource, adCount, adsDir, language, adsLanguage }
+      fields: {
+        tmdbApiKey: tmdbKey,
+        trailerSource,
+        trailerSelectionMode,
+        trailerCount,
+        trailerTargetDurationMin,
+        trailerMaxVideoLengthMin: trailerMaxVideoLengthMin <= 0 ? null : trailerMaxVideoLengthMin,
+        trailersDir,
+        adSource,
+        adSelectionMode,
+        adCount,
+        adTargetDurationMin,
+        adMaxVideoLengthMin: adMaxVideoLengthMin <= 0 ? null : adMaxVideoLengthMin,
+        adsDir,
+        language,
+        adsLanguage
+      }
     })
     markDone(Section.Content)
     setSection(Section.Output)
@@ -366,7 +385,7 @@
     </div>
 
     <div class="sidebar-footer">
-      <Button variant="primary" disabled={!canFinish} onclick={finish}>
+      <Button variant="primary" onclick={finish}>
         Finish Setup
       </Button>
     </div>
@@ -542,9 +561,37 @@
             </div>
           {/if}
 
+          <div class="field-row">
+            <span class="field-label">Selection</span>
+            <ToggleSwitch
+              checked={trailerSelectionMode === 'duration'}
+              offLabel="Count"
+              label="Duration"
+              onchange={(v) => { trailerSelectionMode = v ? 'duration' : 'count' }}
+            />
+          </div>
+
+          {#if trailerSelectionMode === 'count'}
           <div class="field-row field-row--count">
             <label class="field-label-block" for="trailer-count">Count</label>
-            <input id="trailer-count" class="number-input" type="number" min="1" max="10" bind:value={trailerCount} />
+            <input id="trailer-count" class="number-input" type="number" min="1" max="20" bind:value={trailerCount} />
+          </div>
+          {:else}
+          <div class="field-row field-row--count">
+            <label class="field-label-block" for="trailer-duration">Target</label>
+            <div class="duration-input-row">
+              <input id="trailer-duration" class="number-input" type="number" min="1" max="120" bind:value={trailerTargetDurationMin} />
+              <span class="field-label">min</span>
+            </div>
+          </div>
+          {/if}
+
+          <div class="field-row field-row--count">
+            <label class="field-label-block" for="trailer-maxlen">Max per video</label>
+            <div class="duration-input-row">
+              <input id="trailer-maxlen" class="number-input" type="number" min="0" bind:value={trailerMaxVideoLengthMin} />
+              <span class="field-label">{trailerMaxVideoLengthMin <= 0 ? '∞' : 'min'}</span>
+            </div>
           </div>
         </SectionPanel>
 
@@ -578,9 +625,37 @@
             </div>
           {/if}
 
+          <div class="field-row">
+            <span class="field-label">Selection</span>
+            <ToggleSwitch
+              checked={adSelectionMode === 'duration'}
+              offLabel="Count"
+              label="Duration"
+              onchange={(v) => { adSelectionMode = v ? 'duration' : 'count' }}
+            />
+          </div>
+
+          {#if adSelectionMode === 'count'}
           <div class="field-row field-row--count">
             <label class="field-label-block" for="ad-count">Count</label>
-            <input id="ad-count" class="number-input" type="number" min="1" max="10" bind:value={adCount} />
+            <input id="ad-count" class="number-input" type="number" min="1" max="20" bind:value={adCount} />
+          </div>
+          {:else}
+          <div class="field-row field-row--count">
+            <label class="field-label-block" for="ad-duration">Target</label>
+            <div class="duration-input-row">
+              <input id="ad-duration" class="number-input" type="number" min="1" max="60" bind:value={adTargetDurationMin} />
+              <span class="field-label">min</span>
+            </div>
+          </div>
+          {/if}
+
+          <div class="field-row field-row--count">
+            <label class="field-label-block" for="ad-maxlen">Max per video</label>
+            <div class="duration-input-row">
+              <input id="ad-maxlen" class="number-input" type="number" min="0" bind:value={adMaxVideoLengthMin} />
+              <span class="field-label">{adMaxVideoLengthMin <= 0 ? '∞' : 'min'}</span>
+            </div>
           </div>
         </SectionPanel>
 
@@ -1057,6 +1132,12 @@
 
   .number-input:focus {
     border-color: var(--border-focus);
+  }
+
+  .duration-input-row {
+    display: flex;
+    align-items: center;
+    gap: var(--u2);
   }
 
   .lang-select {

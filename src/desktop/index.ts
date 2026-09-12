@@ -245,7 +245,7 @@ async function streamPrebuilt(outputPath: string, signal: AbortSignal): Promise<
 
     if (lightsClient) {
       appendLog('Lights → 0%')
-      await Promise.race([lightsClient.dim(lightIds, 0), Bun.sleep(8000)]).catch(() => {})
+      await Promise.race([lightsClient.off(lightIds), Bun.sleep(8000)]).catch(() => {})
       appendLog('Lights off done')
     }
 

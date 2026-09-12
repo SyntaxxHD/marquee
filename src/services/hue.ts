@@ -106,12 +106,12 @@ export class HueClient {
   async dimLights(lightIds: string[], percent: number): Promise<void> {
     await this.applyState(
       lightIds,
-      new model.LightState().on().brightness(percent).transitiontime(30)
+      new model.LightState().on().brightness(percent).transitiontime(20)
     )
   }
 
   async turnLightsOff(lightIds: string[]): Promise<void> {
-    await this.applyState(lightIds, new model.LightState().off().transitiontime(30))
+    await this.applyState(lightIds, new model.LightState().off().transitiontime(20))
   }
 
   private async applyState(

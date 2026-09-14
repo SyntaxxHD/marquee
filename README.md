@@ -41,54 +41,6 @@ bun run typecheck
 bun run lint
 ```
 
-## Adding a playback backend
-
-marquee has a `StreamingBackend` system. Contributors can add new ones in three steps:
-
-**1.** Create `src/backends/<name>.ts` implementing `StreamingBackend<YourConfig>`:
-
-```ts
-import type { StreamingBackend } from './types.ts'
-
-export interface MyConfig {
-  type: 'mybackend'
-  deviceId: string
-}
-
-export const myBackend: StreamingBackend<MyConfig> = {
-  id: 'mybackend',
-  label: 'My Backend',
-  async discover() {
-    /* return DiscoveredDevice[] */
-  },
-  async setup(device) {
-    return { type: 'mybackend', deviceId: device.id }
-  },
-  async probe(config) {
-    /* return true if reachable */
-  },
-  async play(filePath, config) {
-    /* stream the file */
-  }
-}
-```
-
-**2.** Add `MyConfig` to the union in `src/backends/types.ts`:
-
-```ts
-export type StreamTargetConfig = AppleTVConfig | QuickTimeConfig | MyConfig
-```
-
-**3.** Register it in `src/backends/registry.ts`:
-
-```ts
-[myBackend.id, myBackend as StreamingBackend<StreamTargetConfig>],
-```
-
-The Setup wizard and all RPC handlers pick it up automatically.
-
-If your backend needs to serve a local file over HTTP (e.g. for a receiver that pulls rather than being pushed to), reuse `serveFile` from `src/services/file-server.ts`. It handles range requests, which tvOS requires.
-
 ## Tech stack
 
 - [Electrobun](https://electrobun.dev) (desktop shell, Bun backend + native webview)

@@ -2,12 +2,9 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 
 import { loadConfig, OUTPUT_DIR, NORM_CACHE_DIR } from '../config.ts'
-import { pickAds, pickLocalVideos } from '../services/ads.ts'
-import type { AdResult, VideoSelectionOptions } from '../services/ads.ts'
 import { assemblePreshow } from '../services/assemble.ts'
-import { LeaderboardAdService } from '../services/leaderboard-ads.ts'
-import { TrailerService } from '../services/trailers.ts'
 import type { BuildProgress } from '../shared/app-state.ts'
+import { getAdSource, getTrailerSource } from '../sources/registry.ts'
 import { setActiveTmpDir } from '../utils/tmp.ts'
 
 export interface BuildCue {
@@ -30,11 +27,11 @@ export interface BuildCallbacks {
 function computeGrandTotal(
   adCount: number,
   trailerCount: number,
-  adSourceAuto: boolean,
-  trailerSourceAuto: boolean
+  adNeedsDownload: boolean,
+  trailerNeedsDownload: boolean
 ): number {
   const downloadCount =
-    (adSourceAuto ? adCount : 0) + (trailerSourceAuto ? trailerCount : 0)
+    (adNeedsDownload ? adCount : 0) + (trailerNeedsDownload ? trailerCount : 0)
   const normalizeCount = adCount + trailerCount
   return downloadCount + normalizeCount
 }
@@ -45,14 +42,17 @@ export async function runBuild(
 ): Promise<BuildResult> {
   const config = await loadConfig()
 
-  const adOptions: VideoSelectionOptions = {
+  const adNeedsDownload = config.adSourceConfig.type !== 'local'
+  const trailerNeedsDownload = config.trailerSourceConfig.type !== 'local'
+
+  const adOptions = {
     selectionMode: config.adSelectionMode,
     count: config.adCount,
     targetMs: config.adTargetDurationMin * 60_000,
     maxLengthMs:
       config.adMaxVideoLengthMin !== null ? config.adMaxVideoLengthMin * 60_000 : null
   }
-  const trailerOptions: VideoSelectionOptions = {
+  const trailerOptions = {
     selectionMode: config.trailerSelectionMode,
     count: config.trailerCount,
     targetMs: config.trailerTargetDurationMin * 60_000,
@@ -62,47 +62,34 @@ export async function runBuild(
         : null
   }
 
-  let localAds: AdResult[] | null = null
-  let localTrailerItems: { filePath: string; title: string }[] | null = null
-
-  if (config.adSource === 'local') {
-    localAds = await pickAds(config.adsDir, adOptions)
-  }
-  if (config.trailerSource === 'local') {
-    localTrailerItems = (
-      await pickLocalVideos(config.trailersDir, trailerOptions, 'trailer videos')
-    ).map(t => ({ filePath: t.filePath, title: t.title }))
-  }
-
-  let adCount = localAds ? localAds.length : config.adCount
-  let trailerCount = localTrailerItems ? localTrailerItems.length : config.trailerCount
+  let adCount = config.adCount
+  let trailerCount = config.trailerCount
   let grandTotal = computeGrandTotal(
     adCount,
     trailerCount,
-    config.adSource === 'auto',
-    config.trailerSource === 'auto'
+    adNeedsDownload,
+    trailerNeedsDownload
   )
 
-  let ads: AdResult[]
-  if (config.adSource === 'auto') {
-    const adService = new LeaderboardAdService(config.adsCacheDir, config.adsLanguage)
-    await adService.init()
-    callbacks?.onLog?.(`Fetching ads…`)
-    let currentAdIndex = 0
-    let currentAdLabel = ''
-    let lastAdPercent = 0
-    ads = await adService.fetchAds(
-      adOptions,
-      count => {
+  callbacks?.onLog?.(`Fetching ads…`)
+  let currentAdIndex = 0
+  let currentAdLabel = ''
+  let lastAdPercent = 0
+  const adPlugin = getAdSource(config.adSourceConfig.type)
+  const ads = await adPlugin.fetch(
+    adOptions,
+    config.adSourceConfig,
+    {
+      onPlanReady: count => {
         adCount = count
         grandTotal = computeGrandTotal(
           adCount,
           trailerCount,
-          config.adSource === 'auto',
-          config.trailerSource === 'auto'
+          adNeedsDownload,
+          trailerNeedsDownload
         )
       },
-      (index, title) => {
+      onItemStart: (index, title) => {
         lastAdPercent = 0
         currentAdIndex = index
         currentAdLabel = `Ad ${index + 1}: ${title}`
@@ -114,7 +101,7 @@ export async function runBuild(
           itemPercent: 0
         })
       },
-      percent => {
+      onItemProgress: percent => {
         if (percent <= lastAdPercent) {
           return
         }
@@ -125,38 +112,31 @@ export async function runBuild(
           itemTotal: grandTotal,
           itemPercent: percent
         })
-      },
-      signal
-    )
-  } else {
-    ads = localAds!
-  }
+      }
+    },
+    signal
+  )
 
-  let trailerItems: { filePath: string; title: string }[]
-  if (config.trailerSource === 'auto') {
-    const trailerService = new TrailerService(
-      config.cacheDir,
-      config.tmdbApiKey,
-      config.language
-    )
-    await trailerService.init()
-    callbacks?.onLog?.(`Fetching trailers…`)
-    let currentTrailerIndex = 0
-    let currentTrailerLabel = ''
-    let lastTrailerPercent = 0
-    trailerItems = (
-      await trailerService.fetchTrailers(
-        trailerOptions,
-        count => {
+  callbacks?.onLog?.(`Fetching trailers…`)
+  let currentTrailerIndex = 0
+  let currentTrailerLabel = ''
+  let lastTrailerPercent = 0
+  const trailerPlugin = getTrailerSource(config.trailerSourceConfig.type)
+  const trailerItems = (
+    await trailerPlugin.fetch(
+      trailerOptions,
+      config.trailerSourceConfig,
+      {
+        onPlanReady: count => {
           trailerCount = count
           grandTotal = computeGrandTotal(
             adCount,
             trailerCount,
-            config.adSource === 'auto',
-            config.trailerSource === 'auto'
+            adNeedsDownload,
+            trailerNeedsDownload
           )
         },
-        (index, title) => {
+        onItemStart: (index, title) => {
           lastTrailerPercent = 0
           currentTrailerIndex = index
           currentTrailerLabel = `Trailer ${index + 1}: ${title}`
@@ -168,7 +148,7 @@ export async function runBuild(
             itemPercent: 0
           })
         },
-        percent => {
+        onItemProgress: percent => {
           if (percent <= lastTrailerPercent) {
             return
           }
@@ -179,13 +159,11 @@ export async function runBuild(
             itemTotal: grandTotal,
             itemPercent: percent
           })
-        },
-        signal
-      )
-    ).map(t => ({ filePath: t.filePath, title: t.title }))
-  } else {
-    trailerItems = localTrailerItems!
-  }
+        }
+      },
+      signal
+    )
+  ).map(r => ({ filePath: r.filePath, title: r.title }))
 
   const files = [...ads.map(a => a.filePath), ...trailerItems.map(t => t.filePath)]
 
@@ -199,8 +177,7 @@ export async function runBuild(
   setActiveTmpDir(tmpDir)
 
   const downloadCount =
-    (config.adSource === 'auto' ? adCount : 0) +
-    (config.trailerSource === 'auto' ? trailerCount : 0)
+    (adNeedsDownload ? adCount : 0) + (trailerNeedsDownload ? trailerCount : 0)
 
   callbacks?.onLog?.(`Normalizing ${files.length} segments…`)
   let currentSegmentIndex = 0

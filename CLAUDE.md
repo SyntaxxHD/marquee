@@ -65,7 +65,8 @@ The Setup wizard, RPC handlers, and probe logic all pick it up automatically. Ex
 ### Lights plugins (`src/lights/`)
 
 1. Create `src/lights/<name>.ts` implementing `LightsPlugin<TConfig>` from `types.ts`
-2. Register it in `registry.ts`
+2. Add `TConfig` to the `LightsConfig` union in `types.ts`
+3. Register it in `registry.ts`
 
 Existing: `hue`.
 

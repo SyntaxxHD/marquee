@@ -2,7 +2,7 @@
 
 A streaming backend teaches marquee how to send an assembled video to one kind
 of playback target. Apple TV (AirPlay) and QuickTime (macOS AirPlay) ship in the
-box. Backends are part of the source tree (they are not downloadable plugins),
+box. Backends are part of the source tree,
 but adding one is deliberately small and self-contained.
 
 ## The contract

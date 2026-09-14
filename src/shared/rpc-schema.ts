@@ -2,12 +2,27 @@ import type { StreamTargetConfig } from '../backends/types.ts'
 import type { DiscoveredDevice } from '../backends/types.ts'
 import type { UserConfig } from '../config.ts'
 import type { LightInfo, DiscoveredBridge } from '../lights/types.ts'
+import type {
+  AdSourceConfig,
+  TrailerSourceConfig,
+  SourceFieldSpec
+} from '../sources/types.ts'
+import { SourceFieldType, SourceKind } from '../sources/types.ts'
 
 import type { AppState, ShowPhase, CueMode } from './app-state.ts'
+
+export { SourceFieldType, SourceKind }
 
 export type { DiscoveredDevice, LightInfo, DiscoveredBridge }
 export type BackendInfo = { id: string; label: string }
 export type LightsPluginInfo = { id: string; label: string }
+export type SourcePluginInfo = {
+  id: string
+  label: string
+  description: string
+  configFields: SourceFieldSpec[]
+  requiresValidation: boolean
+}
 
 export type MarqueeRPC = {
   bun: {
@@ -34,7 +49,12 @@ export type MarqueeRPC = {
       navigateTo: { params: { screen: AppState['screen'] }; response: void }
       getFullConfig: { params: undefined; response: UserConfig | null }
       saveConfigFields: { params: { fields: Partial<UserConfig> }; response: void }
-      validateTmdbKey: { params: { apiKey: string }; response: boolean }
+      listAdSources: { params: undefined; response: SourcePluginInfo[] }
+      listTrailerSources: { params: undefined; response: SourcePluginInfo[] }
+      validateSourceConfig: {
+        params: { kind: SourceKind; config: AdSourceConfig | TrailerSourceConfig }
+        response: boolean
+      }
       listLightsPlugins: { params: undefined; response: LightsPluginInfo[] }
       discoverLightBridges: { params: { pluginId: string }; response: DiscoveredBridge[] }
       pairLightBridge: { params: { pluginId: string; ip: string }; response: string }

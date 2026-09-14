@@ -5,46 +5,37 @@ import envPaths from 'env-paths'
 
 import type { StreamTargetConfig } from './backends/types.ts'
 import type { LightsConfig } from './lights/types.ts'
+import type { AdSourceConfig, TrailerSourceConfig } from './sources/types.ts'
 import { MarqueeError } from './utils/errors.ts'
 
 export type OutputResolution = '1920x1080' | '3840x2160'
 export type OutputFps = 25 | 30 | 60
-export type AdSource = 'auto' | 'local'
-export type TrailerSource = 'auto' | 'local'
 export type SelectionMode = 'count' | 'duration'
 
 export interface UserConfig {
-  tmdbApiKey: string
-  adSource: AdSource
-  adsDir: string
+  adSourceConfig: AdSourceConfig
   adCount: number
   adSelectionMode: SelectionMode
   adTargetDurationMin: number
   adMaxVideoLengthMin: number | null
-  trailerSource: TrailerSource
-  trailersDir: string
+  trailerSourceConfig: TrailerSourceConfig
   trailerCount: number
   trailerSelectionMode: SelectionMode
   trailerTargetDurationMin: number
   trailerMaxVideoLengthMin: number | null
   streamTarget: StreamTargetConfig | null
-  language: string
-  adsLanguage: string
   outputResolution: OutputResolution
   outputFps: OutputFps
   lights: LightsConfig | null
 }
 
 export interface Config {
-  tmdbApiKey: string
-  adSource: AdSource
-  adsDir: string
+  adSourceConfig: AdSourceConfig
   adCount: number
   adSelectionMode: SelectionMode
   adTargetDurationMin: number
   adMaxVideoLengthMin: number | null
-  trailerSource: TrailerSource
-  trailersDir: string
+  trailerSourceConfig: TrailerSourceConfig
   trailerCount: number
   trailerSelectionMode: SelectionMode
   trailerTargetDurationMin: number
@@ -52,8 +43,6 @@ export interface Config {
   cacheDir: string
   adsCacheDir: string
   streamTarget: StreamTargetConfig | null
-  language: string
-  adsLanguage: string
   outputResolution: OutputResolution
   outputFps: OutputFps
   lights: LightsConfig | null
@@ -88,6 +77,31 @@ export async function loadUserConfig(): Promise<UserConfig | null> {
   }
   delete raw.hue
 
+  if (!raw.adSourceConfig) {
+    raw.adSourceConfig =
+      raw.adSource === 'auto'
+        ? { type: 'leaderboard', language: raw.adsLanguage ?? 'en-US' }
+        : { type: 'local', dir: raw.adsDir ?? '' }
+    delete raw.adSource
+    delete raw.adsDir
+    delete raw.adsLanguage
+  }
+
+  if (!raw.trailerSourceConfig) {
+    raw.trailerSourceConfig =
+      raw.trailerSource === 'auto'
+        ? {
+            type: 'tmdb',
+            apiKey: raw.tmdbApiKey ?? '',
+            language: raw.language ?? 'en-US'
+          }
+        : { type: 'local', dir: raw.trailersDir ?? '' }
+    delete raw.trailerSource
+    delete raw.trailersDir
+    delete raw.tmdbApiKey
+    delete raw.language
+  }
+
   return raw as unknown as UserConfig
 }
 
@@ -103,46 +117,41 @@ export async function loadConfig(): Promise<Config> {
     throw new MarqueeError('No configuration found. Run `marquee setup` first.')
   }
 
-  const adSource: AdSource = userConfig.adSource ?? 'local'
-  const trailerSource: TrailerSource = userConfig.trailerSource ?? 'auto'
-  const adsDir = resolve(userConfig.adsDir)
-  const trailersDir = resolve(userConfig.trailersDir ?? './trailers')
+  const adSourceConfig = userConfig.adSourceConfig ?? { type: 'local', dir: '' }
+  const trailerSourceConfig = userConfig.trailerSourceConfig ?? { type: 'local', dir: '' }
 
-  if (trailerSource === 'auto' && !userConfig.tmdbApiKey) {
+  if (adSourceConfig.type === 'local') {
+    try {
+      await stat(resolve(adSourceConfig.dir))
+    } catch {
+      throw new MarqueeError(
+        `Ads directory not found: ${adSourceConfig.dir}\nCreate it and add some video files, or re-run \`marquee setup\`.`
+      )
+    }
+  }
+
+  if (trailerSourceConfig.type === 'local') {
+    try {
+      await stat(resolve(trailerSourceConfig.dir))
+    } catch {
+      throw new MarqueeError(
+        `Trailers directory not found: ${trailerSourceConfig.dir}\nCreate it and add some video files, or re-run \`marquee setup\`.`
+      )
+    }
+  }
+
+  if (trailerSourceConfig.type === 'tmdb' && !trailerSourceConfig.apiKey) {
     throw new MarqueeError('No TMDB API key configured. Run `marquee setup` first.')
   }
 
-  if (adSource === 'local') {
-    try {
-      await stat(adsDir)
-    } catch {
-      throw new MarqueeError(
-        `Ads directory not found: ${adsDir}\nCreate it and add some video files, or re-run \`marquee setup\`.`
-      )
-    }
-  }
-
-  if (trailerSource === 'local') {
-    try {
-      await stat(trailersDir)
-    } catch {
-      throw new MarqueeError(
-        `Trailers directory not found: ${trailersDir}\nCreate it and add some video files, or re-run \`marquee setup\`.`
-      )
-    }
-  }
-
   return {
-    tmdbApiKey: userConfig.tmdbApiKey,
-    adSource,
-    adsDir,
+    adSourceConfig,
     adCount: userConfig.adCount ?? 4,
     adSelectionMode: userConfig.adSelectionMode ?? 'count',
     adTargetDurationMin: userConfig.adTargetDurationMin ?? 5,
     adMaxVideoLengthMin:
       userConfig.adMaxVideoLengthMin !== undefined ? userConfig.adMaxVideoLengthMin : 1,
-    trailerSource,
-    trailersDir,
+    trailerSourceConfig,
     trailerCount: userConfig.trailerCount ?? 3,
     trailerSelectionMode: userConfig.trailerSelectionMode ?? 'count',
     trailerTargetDurationMin: userConfig.trailerTargetDurationMin ?? 10,
@@ -153,8 +162,6 @@ export async function loadConfig(): Promise<Config> {
     cacheDir: CACHE_DIR,
     adsCacheDir: ADS_CACHE_DIR,
     streamTarget: userConfig.streamTarget,
-    language: userConfig.language ?? 'en-US',
-    adsLanguage: userConfig.adsLanguage ?? 'en-US',
     outputResolution: userConfig.outputResolution,
     outputFps: userConfig.outputFps,
     lights: userConfig.lights ?? null

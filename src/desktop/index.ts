@@ -23,7 +23,6 @@ import {
 } from '../lights/registry.ts'
 import { concatSegments } from '../services/assemble.ts'
 import { probeFileDuration } from '../services/player.ts'
-import { TmdbClient } from '../services/tmdb.ts'
 import {
   INITIAL_STATE,
   ShowPhase,
@@ -33,6 +32,14 @@ import {
 } from '../shared/app-state.ts'
 import type { AppState } from '../shared/app-state.ts'
 import type { MarqueeRPC } from '../shared/rpc-schema.ts'
+import {
+  listAdSources,
+  getAdSource,
+  listTrailerSources,
+  getTrailerSource
+} from '../sources/registry.ts'
+import type { AdSourceConfig, TrailerSourceConfig } from '../sources/types.ts'
+import { SourceKind } from '../sources/types.ts'
 import { MarqueeError } from '../utils/errors.ts'
 import { clearSession, loadSession, saveSession } from '../utils/session.ts'
 
@@ -737,9 +744,22 @@ const rpc = defineElectrobunRPC<MarqueeRPC>('bun', {
         await saveUserConfig(merged as Parameters<typeof saveUserConfig>[0])
       },
 
-      validateTmdbKey: async ({ apiKey }) => {
-        const client = new TmdbClient(apiKey, 'en')
-        return client.validateApiKey()
+      listAdSources: async () => listAdSources(),
+
+      listTrailerSources: async () => listTrailerSources(),
+
+      validateSourceConfig: async ({
+        kind,
+        config
+      }: {
+        kind: SourceKind
+        config: AdSourceConfig | TrailerSourceConfig
+      }) => {
+        const plugin =
+          kind === SourceKind.Ad
+            ? getAdSource(config.type)
+            : getTrailerSource(config.type)
+        return plugin.validate?.(config as never) ?? false
       },
 
       listLightsPlugins: async () => listLightsPlugins(),

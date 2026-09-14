@@ -2,9 +2,9 @@
   import { Check, ChevronDown } from 'lucide-svelte'
   import { rpc, pairingProtocol } from '../rpc.ts'
   import { appState } from '../store.ts'
-  import type { BackendInfo, DiscoveredDevice, LightsPluginInfo, LightInfo, DiscoveredBridge } from '$shared/rpc-schema.ts'
-  import type { UserConfig, OutputResolution, OutputFps, AdSource, TrailerSource } from '../../config.ts'
-  import { TMDB_LANGUAGES, ADS_LANGUAGES } from '$shared/languages.ts'
+  import type { BackendInfo, DiscoveredDevice, LightsPluginInfo, LightInfo, DiscoveredBridge, SourcePluginInfo } from '$shared/rpc-schema.ts'
+  import { SourceFieldType, SourceKind } from '$shared/rpc-schema.ts'
+  import type { UserConfig, OutputResolution, OutputFps } from '../../config.ts'
   import { AppScreen } from '$shared/app-state.ts'
   import { Section, SectionState, PlaybackStep, HueStep } from './setup-enums.ts'
   import Button from '../components/Button.svelte'
@@ -14,7 +14,6 @@
   import DeviceIcon from '../components/DeviceIcon.svelte'
   import Spinner from '../components/Spinner.svelte'
   import StatusBadge from '../components/StatusBadge.svelte'
-  import ToggleSwitch from '../components/ToggleSwitch.svelte'
   import LightFader from '../components/LightFader.svelte'
 
   let activeSection = $state<Section>(Section.Playback)
@@ -36,25 +35,7 @@
 
   async function finish() {
     if (activeSection === Section.Content && contentCanContinue) {
-      await rpc.request.saveConfigFields({
-        fields: {
-          tmdbApiKey: tmdbKey,
-          trailerSource,
-          trailerSelectionMode,
-          trailerCount,
-          trailerTargetDurationMin,
-          trailerMaxVideoLengthMin: trailerMaxVideoLengthMin <= 0 ? null : trailerMaxVideoLengthMin,
-          trailersDir,
-          adSource,
-          adSelectionMode,
-          adCount,
-          adTargetDurationMin,
-          adMaxVideoLengthMin: adMaxVideoLengthMin <= 0 ? null : adMaxVideoLengthMin,
-          adsDir,
-          language,
-          adsLanguage
-        }
-      })
+      await saveContent()
     } else if (activeSection === Section.Output) {
       await rpc.request.saveConfigFields({ fields: { outputResolution, outputFps } })
     } else if (activeSection === Section.Lights && hueStep === HueStep.Done) {
@@ -77,23 +58,28 @@
       markDone(Section.Playback)
     }
 
-    if (config.tmdbApiKey || config.trailerSource === 'local') {
-      tmdbKey = config.tmdbApiKey ?? ''
-      tmdbValid = config.tmdbApiKey ? true : null
-      trailerSource = config.trailerSource ?? 'auto'
-      trailerSelectionMode = config.trailerSelectionMode ?? 'count'
-      trailerCount = config.trailerCount ?? 3
-      trailerTargetDurationMin = config.trailerTargetDurationMin ?? 10
-      trailerMaxVideoLengthMin = config.trailerMaxVideoLengthMin ?? 0
-      trailersDir = config.trailersDir ?? ''
-      adSource = config.adSource ?? 'local'
+    if (config.adSourceConfig || config.trailerSourceConfig) {
+      if (config.adSourceConfig) {
+        selectedAdSourceId = config.adSourceConfig.type
+        const { type: _adType, ...adFields } = config.adSourceConfig as Record<string, unknown>
+        adConfig = adFields as Record<string, string>
+      }
+      if (config.trailerSourceConfig) {
+        selectedTrailerSourceId = config.trailerSourceConfig.type
+        const { type: _trailerType, ...trailerFields } = config.trailerSourceConfig as Record<string, unknown>
+        trailerConfig = trailerFields as Record<string, string>
+        if (config.trailerSourceConfig.type === 'tmdb' && config.trailerSourceConfig.apiKey) {
+          trailerValidated = true
+        }
+      }
       adSelectionMode = config.adSelectionMode ?? 'count'
       adCount = config.adCount ?? 4
       adTargetDurationMin = config.adTargetDurationMin ?? 5
       adMaxVideoLengthMin = config.adMaxVideoLengthMin ?? 1
-      adsDir = config.adsDir ?? ''
-      language = config.language ?? 'en-US'
-      adsLanguage = config.adsLanguage ?? 'en-US'
+      trailerSelectionMode = config.trailerSelectionMode ?? 'count'
+      trailerCount = config.trailerCount ?? 3
+      trailerTargetDurationMin = config.trailerTargetDurationMin ?? 10
+      trailerMaxVideoLengthMin = config.trailerMaxVideoLengthMin ?? 0
       markDone(Section.Content)
     }
     if (config.outputResolution && config.outputFps) {
@@ -203,60 +189,102 @@
   }
 
   // --- Section 2: Content ---
-  let tmdbKey = $state('')
-  let tmdbValid = $state<boolean | null>(null)
-  let tmdbValidating = $state(false)
-  let trailerSource = $state<TrailerSource>('auto')
-  let trailerSelectionMode = $state<'count' | 'duration'>('count')
-  let trailerCount = $state(3)
-  let trailerTargetDurationMin = $state(10)
-  let trailerMaxVideoLengthMin = $state(0)
-  let trailersDir = $state('')
-  let adSource = $state<AdSource>('local')
+  let adSources = $state<SourcePluginInfo[]>([])
+  let trailerSources = $state<SourcePluginInfo[]>([])
+  let selectedAdSourceId = $state('local')
+  let selectedTrailerSourceId = $state('local')
+  let adConfig = $state<Record<string, string>>({})
+  let trailerConfig = $state<Record<string, string>>({})
+  let adValidated = $state<boolean | null>(null)
+  let adValidating = $state(false)
+  let trailerValidated = $state<boolean | null>(null)
+  let trailerValidating = $state(false)
   let adSelectionMode = $state<'count' | 'duration'>('count')
   let adCount = $state(4)
   let adTargetDurationMin = $state(5)
   let adMaxVideoLengthMin = $state(1)
-  let adsDir = $state('')
-  let language = $state('en-US')
-  let adsLanguage = $state('en-US')
+  let trailerSelectionMode = $state<'count' | 'duration'>('count')
+  let trailerCount = $state(3)
+  let trailerTargetDurationMin = $state(10)
+  let trailerMaxVideoLengthMin = $state(0)
 
-  async function validateTmdb() {
-    tmdbValidating = true
-    tmdbValid = null
-    try {
-      tmdbValid = await rpc.request.validateTmdbKey({ apiKey: tmdbKey })
+  let activeAdSource = $derived(adSources.find(s => s.id === selectedAdSourceId) ?? null)
+  let activeTrailerSource = $derived(trailerSources.find(s => s.id === selectedTrailerSourceId) ?? null)
 
-      if (tmdbValid) {
-        await rpc.request.saveConfigFields({ fields: { tmdbApiKey: tmdbKey } })
-      }
-    } finally {
-      tmdbValidating = false
+  $effect(() => {
+    Promise.all([
+      rpc.request.listAdSources(),
+      rpc.request.listTrailerSources()
+    ]).then(([ads, trailers]) => {
+      adSources = ads
+      trailerSources = trailers
+    })
+  })
+
+  function sourceIsReady(
+    info: SourcePluginInfo | null,
+    cfg: Record<string, string>,
+    validated: boolean | null
+  ): boolean {
+    if (!info) {
+      return false
     }
+    const allRequiredFilled = info.configFields
+      .filter(f => f.required)
+      .every(f => (cfg[f.key] ?? '').trim().length > 0)
+    if (!allRequiredFilled) {
+      return false
+    }
+    if (info.requiresValidation && validated !== true) {
+      return false
+    }
+    return true
   }
 
   let contentCanContinue = $derived(
-    trailerSource === 'local' || (tmdbValid === true && tmdbKey.length > 0)
+    sourceIsReady(activeAdSource, adConfig, adValidated) &&
+    sourceIsReady(activeTrailerSource, trailerConfig, trailerValidated)
   )
+
+  async function validateSource(kind: SourceKind) {
+    if (kind === SourceKind.Ad) {
+      adValidating = true
+      adValidated = null
+      try {
+        adValidated = await rpc.request.validateSourceConfig({
+          kind: SourceKind.Ad,
+          config: { type: selectedAdSourceId, ...adConfig } as never
+        })
+      } finally {
+        adValidating = false
+      }
+    } else {
+      trailerValidating = true
+      trailerValidated = null
+      try {
+        trailerValidated = await rpc.request.validateSourceConfig({
+          kind: SourceKind.Trailer,
+          config: { type: selectedTrailerSourceId, ...trailerConfig } as never
+        })
+      } finally {
+        trailerValidating = false
+      }
+    }
+  }
 
   async function saveContent() {
     await rpc.request.saveConfigFields({
       fields: {
-        tmdbApiKey: tmdbKey,
-        trailerSource,
-        trailerSelectionMode,
-        trailerCount,
-        trailerTargetDurationMin,
-        trailerMaxVideoLengthMin: trailerMaxVideoLengthMin <= 0 ? null : trailerMaxVideoLengthMin,
-        trailersDir,
-        adSource,
+        adSourceConfig: { type: selectedAdSourceId, ...adConfig } as never,
         adSelectionMode,
         adCount,
         adTargetDurationMin,
         adMaxVideoLengthMin: adMaxVideoLengthMin <= 0 ? null : adMaxVideoLengthMin,
-        adsDir,
-        language,
-        adsLanguage
+        trailerSourceConfig: { type: selectedTrailerSourceId, ...trailerConfig } as never,
+        trailerSelectionMode,
+        trailerCount,
+        trailerTargetDurationMin,
+        trailerMaxVideoLengthMin: trailerMaxVideoLengthMin <= 0 ? null : trailerMaxVideoLengthMin
       }
     })
     markDone(Section.Content)
@@ -539,61 +567,91 @@
         <SectionPanel label="Trailers">
           <div class="field-row">
             <span class="field-label">Source</span>
-            <ToggleSwitch
-              checked={trailerSource === 'auto'}
-              offLabel="Local folder"
-              label="Auto (TMDB)"
-              onchange={(v) => { trailerSource = v ? 'auto' : 'local' }}
-            />
+            <div class="lang-select-wrap">
+              <select
+                class="lang-select"
+                value={selectedTrailerSourceId}
+                onchange={e => {
+                  selectedTrailerSourceId = (e.target as HTMLSelectElement).value
+                  trailerConfig = {}
+                  trailerValidated = null
+                }}
+              >
+                {#each trailerSources as src}
+                  <option value={src.id}>{src.label}</option>
+                {/each}
+              </select>
+              <span class="lang-chevron"><ChevronDown size={14} /></span>
+            </div>
           </div>
 
-          {#if trailerSource === 'auto'}
-            <div class="field-group">
-              <label class="field-label-block">TMDB API Key</label>
-              <div class="key-row">
-                <TextInput
-                  bind:value={tmdbKey}
-                  placeholder="v4 read access token"
-                  type="password"
-                  onchange={() => { tmdbValid = null }}
-                />
-                <Button variant="ghost" onclick={validateTmdb} disabled={tmdbValidating || !tmdbKey}>
-                  {#if tmdbValidating}<Spinner size={12} />{:else}Validate{/if}
-                </Button>
+          {#if activeTrailerSource}
+            {#each activeTrailerSource.configFields as field (field.key)}
+              <div class="field-group">
+                <label class="field-label-block">{field.label}</label>
+                {#if field.type === SourceFieldType.Select}
+                  <div class="lang-select-wrap">
+                    <select
+                      class="lang-select"
+                      value={trailerConfig[field.key] ?? ''}
+                      onchange={e => {
+                        trailerConfig = { ...trailerConfig, [field.key]: (e.target as HTMLSelectElement).value }
+                        trailerValidated = null
+                      }}
+                    >
+                      {#each (field.options ?? []) as opt}
+                        <option value={opt.code}>{opt.label}</option>
+                      {/each}
+                    </select>
+                    <span class="lang-chevron"><ChevronDown size={14} /></span>
+                  </div>
+                {:else}
+                  <TextInput
+                    value={trailerConfig[field.key] ?? ''}
+                    placeholder={field.placeholder ?? ''}
+                    hint={field.hint}
+                    type={field.type === SourceFieldType.Password ? 'password' : 'text'}
+                    onchange={v => {
+                      trailerConfig = { ...trailerConfig, [field.key]: v }
+                      trailerValidated = null
+                    }}
+                  />
+                {/if}
               </div>
-              {#if tmdbValid === true}
-                <StatusBadge state="done" label="Key valid" variant="plain" />
-              {:else if tmdbValid === false}
-                <StatusBadge state="fault" label="Invalid key" variant="plain" />
-              {/if}
-            </div>
+            {/each}
 
-            <div class="field-group">
-              <label class="field-label-block">Language</label>
-              <div class="lang-select-wrap">
-                <select class="lang-select" bind:value={language}>
-                  {#each TMDB_LANGUAGES as lang}
-                    <option value={lang.code}>{lang.label}</option>
-                  {/each}
-                </select>
-                <span class="lang-chevron"><ChevronDown size={14} /></span>
+            {#if activeTrailerSource.requiresValidation}
+              <div class="validate-row">
+                <Button
+                  variant="ghost"
+                  onclick={() => validateSource(SourceKind.Trailer)}
+                  disabled={trailerValidating || !sourceIsReady(activeTrailerSource, trailerConfig, null)}
+                >
+                  {#if trailerValidating}<Spinner size={12} />{:else}Validate{/if}
+                </Button>
+                {#if trailerValidated === true}
+                  <StatusBadge state="done" label="Key valid" variant="plain" />
+                {:else if trailerValidated === false}
+                  <StatusBadge state="fault" label="Invalid key" variant="plain" />
+                {/if}
               </div>
-            </div>
-          {:else}
-            <div class="field-group">
-              <label class="field-label-block">Trailers folder</label>
-              <TextInput bind:value={trailersDir} placeholder="/path/to/trailers" hint="Absolute path to a folder of video files" />
-            </div>
+            {/if}
           {/if}
 
           <div class="field-row">
             <span class="field-label">Selection</span>
-            <ToggleSwitch
-              checked={trailerSelectionMode === 'duration'}
-              offLabel="Count"
-              label="Duration"
-              onchange={(v) => { trailerSelectionMode = v ? 'duration' : 'count' }}
-            />
+            <div class="toggle-pair">
+              <button
+                class="toggle-opt"
+                class:is-active={trailerSelectionMode === 'count'}
+                onclick={() => { trailerSelectionMode = 'count' }}
+              >Count</button>
+              <button
+                class="toggle-opt"
+                class:is-active={trailerSelectionMode === 'duration'}
+                onclick={() => { trailerSelectionMode = 'duration' }}
+              >Duration</button>
+            </div>
           </div>
 
           {#if trailerSelectionMode === 'count'}
@@ -623,41 +681,91 @@
         <SectionPanel label="Ads">
           <div class="field-row">
             <span class="field-label">Source</span>
-            <ToggleSwitch
-              checked={adSource === 'auto'}
-              offLabel="Local folder"
-              label="Auto"
-              onchange={(v) => { adSource = v ? 'auto' : 'local' }}
-            />
+            <div class="lang-select-wrap">
+              <select
+                class="lang-select"
+                value={selectedAdSourceId}
+                onchange={e => {
+                  selectedAdSourceId = (e.target as HTMLSelectElement).value
+                  adConfig = {}
+                  adValidated = null
+                }}
+              >
+                {#each adSources as src}
+                  <option value={src.id}>{src.label}</option>
+                {/each}
+              </select>
+              <span class="lang-chevron"><ChevronDown size={14} /></span>
+            </div>
           </div>
 
-          {#if adSource === 'auto'}
-            <div class="field-group">
-              <label class="field-label-block">Language</label>
-              <div class="lang-select-wrap">
-                <select class="lang-select" bind:value={adsLanguage}>
-                  {#each ADS_LANGUAGES as lang}
-                    <option value={lang.code}>{lang.label}</option>
-                  {/each}
-                </select>
-                <span class="lang-chevron"><ChevronDown size={14} /></span>
+          {#if activeAdSource}
+            {#each activeAdSource.configFields as field (field.key)}
+              <div class="field-group">
+                <label class="field-label-block">{field.label}</label>
+                {#if field.type === SourceFieldType.Select}
+                  <div class="lang-select-wrap">
+                    <select
+                      class="lang-select"
+                      value={adConfig[field.key] ?? ''}
+                      onchange={e => {
+                        adConfig = { ...adConfig, [field.key]: (e.target as HTMLSelectElement).value }
+                        adValidated = null
+                      }}
+                    >
+                      {#each (field.options ?? []) as opt}
+                        <option value={opt.code}>{opt.label}</option>
+                      {/each}
+                    </select>
+                    <span class="lang-chevron"><ChevronDown size={14} /></span>
+                  </div>
+                {:else}
+                  <TextInput
+                    value={adConfig[field.key] ?? ''}
+                    placeholder={field.placeholder ?? ''}
+                    hint={field.hint}
+                    type={field.type === SourceFieldType.Password ? 'password' : 'text'}
+                    onchange={v => {
+                      adConfig = { ...adConfig, [field.key]: v }
+                      adValidated = null
+                    }}
+                  />
+                {/if}
               </div>
-            </div>
-          {:else}
-            <div class="field-group">
-              <label class="field-label-block">Ads folder</label>
-              <TextInput bind:value={adsDir} placeholder="/path/to/ads" hint="Absolute path to a folder of video files" />
-            </div>
+            {/each}
+
+            {#if activeAdSource.requiresValidation}
+              <div class="validate-row">
+                <Button
+                  variant="ghost"
+                  onclick={() => validateSource(SourceKind.Ad)}
+                  disabled={adValidating || !sourceIsReady(activeAdSource, adConfig, null)}
+                >
+                  {#if adValidating}<Spinner size={12} />{:else}Validate{/if}
+                </Button>
+                {#if adValidated === true}
+                  <StatusBadge state="done" label="Key valid" variant="plain" />
+                {:else if adValidated === false}
+                  <StatusBadge state="fault" label="Invalid key" variant="plain" />
+                {/if}
+              </div>
+            {/if}
           {/if}
 
           <div class="field-row">
             <span class="field-label">Selection</span>
-            <ToggleSwitch
-              checked={adSelectionMode === 'duration'}
-              offLabel="Count"
-              label="Duration"
-              onchange={(v) => { adSelectionMode = v ? 'duration' : 'count' }}
-            />
+            <div class="toggle-pair">
+              <button
+                class="toggle-opt"
+                class:is-active={adSelectionMode === 'count'}
+                onclick={() => { adSelectionMode = 'count' }}
+              >Count</button>
+              <button
+                class="toggle-opt"
+                class:is-active={adSelectionMode === 'duration'}
+                onclick={() => { adSelectionMode = 'duration' }}
+              >Duration</button>
+            </div>
           </div>
 
           {#if adSelectionMode === 'count'}
@@ -1142,6 +1250,13 @@
     flex: 1;
   }
 
+  .validate-row {
+    display: flex;
+    align-items: center;
+    gap: var(--u3);
+    margin-top: var(--u3);
+  }
+
   .number-input {
     width: 60px;
     padding: var(--u1) var(--u2);
@@ -1195,6 +1310,38 @@
     pointer-events: none;
     display: flex;
     align-items: center;
+  }
+
+  .toggle-pair {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .toggle-opt {
+    padding: var(--u1) var(--u3);
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+
+  .toggle-opt + .toggle-opt {
+    border-left: 1px solid var(--border);
+  }
+
+  .toggle-opt:hover {
+    color: var(--text-secondary);
+    background: var(--bg-raised);
+  }
+
+  .toggle-opt.is-active {
+    color: var(--amber);
+    background: rgba(212, 147, 10, 0.06);
   }
 
   .light-list {

@@ -6,9 +6,11 @@ import { getBackend } from '../backends/registry.ts'
 import { runBuild } from '../commands/build.ts'
 import { loadUserConfig, NORM_CACHE_DIR, OUTPUT_DIR } from '../config.ts'
 import { getLightsPluginFor } from '../lights/registry.ts'
+import type { LightsClient } from '../lights/types.ts'
 import { concatSegments } from '../services/assemble.ts'
 import { probeFileDuration } from '../services/player.ts'
 import { AppScreen, CueMode, CueStatus, ShowPhase } from '../shared/app-state.ts'
+import type { CueItem } from '../shared/app-state.ts'
 import { MarqueeError } from '../utils/errors.ts'
 import { loadSession, saveSession } from '../utils/session.ts'
 
@@ -60,6 +62,141 @@ function waitForConfirm(): Promise<void> {
     confirmResolve = resolve
     confirmReject = reject
   })
+}
+
+interface LightsContext {
+  client: LightsClient
+  lightIds: string[]
+  dimPercent: number
+}
+
+function loadLightsContext(
+  userConfig: Awaited<ReturnType<typeof loadUserConfig>>
+): LightsContext | null {
+  const cfg = userConfig?.lights
+  if (!cfg) {
+    return null
+  }
+  return {
+    client: getLightsPluginFor(cfg).createClient(cfg),
+    lightIds: cfg.controlledLightIds,
+    dimPercent: cfg.dimPercent ?? 30
+  }
+}
+
+interface VideoCueInput {
+  label: string
+  durationMs?: number | null
+}
+
+interface BuildCueListOpts {
+  videoCues: VideoCueInput[]
+  lightsCtx: LightsContext | null
+  needsResume: boolean
+  startupDelayMs: number
+  dimPercent: number
+}
+
+function buildShowCues({
+  videoCues,
+  lightsCtx,
+  needsResume,
+  startupDelayMs,
+  dimPercent
+}: BuildCueListOpts): CueItem[] {
+  const mapped: CueItem[] = videoCues.map((c, i) => ({
+    id: String(i),
+    label: c.label,
+    durationMs: c.durationMs ?? null,
+    status: CueStatus.Pending
+  }))
+
+  const startup: CueItem[] =
+    startupDelayMs > 0
+      ? [
+          {
+            id: '__stream-startup__',
+            label: 'Opening stream…',
+            durationMs: startupDelayMs,
+            status: CueStatus.Pending
+          }
+        ]
+      : []
+
+  const lightsDim: CueItem[] = lightsCtx
+    ? [
+        {
+          id: '__lights-dim__',
+          label: `Lights → ${dimPercent}%`,
+          durationMs: null,
+          status: CueStatus.Pending,
+          concurrent: startupDelayMs > 0
+        }
+      ]
+    : []
+
+  const lightsOff: CueItem[] = lightsCtx
+    ? [
+        {
+          id: '__lights-off__',
+          label: 'Lights → 0%',
+          durationMs: null,
+          status: CueStatus.Pending
+        }
+      ]
+    : []
+
+  const resume: CueItem[] = needsResume
+    ? [
+        {
+          id: '__play-content__',
+          label: 'Play content',
+          durationMs: null,
+          status: CueStatus.Pending,
+          concurrent: lightsCtx != null
+        }
+      ]
+    : []
+
+  return [...startup, ...lightsDim, ...mapped, ...lightsOff, ...resume]
+}
+
+interface TimelineEntry {
+  id: string
+  label: string
+  startMs: number
+  endMs: number
+}
+
+function buildPlaybackTimeline(
+  videoCues: CueItem[],
+  totalDurationMs: number | undefined
+): TimelineEntry[] {
+  const hasPerCueDurations = videoCues.every(
+    c => typeof c.durationMs === 'number' && c.durationMs > 0
+  )
+
+  if (hasPerCueDurations && videoCues.length > 0) {
+    let offset = 0
+    return videoCues.map(c => {
+      const startMs = offset
+      const endMs = offset + (c.durationMs ?? 0)
+      offset = endMs
+      return { id: c.id, label: c.label, startMs, endMs }
+    })
+  }
+
+  if (totalDurationMs && videoCues.length > 0) {
+    const perCue = totalDurationMs / videoCues.length
+    return videoCues.map((c, i) => ({
+      id: c.id,
+      label: c.label,
+      startMs: i * perCue,
+      endMs: (i + 1) * perCue
+    }))
+  }
+
+  return []
 }
 
 export async function initFromConfig() {
@@ -119,80 +256,52 @@ export async function streamPrebuilt(
     throw new MarqueeError('No playback device configured.')
   }
 
-  const lightsConfig = userConfig.lights
-  const lightsPlugin = lightsConfig ? getLightsPluginFor(lightsConfig) : null
-  const lightsClient = lightsPlugin ? lightsPlugin.createClient(lightsConfig!) : null
-  const lightIds = lightsConfig?.controlledLightIds ?? []
-  const dimPercent = lightsConfig?.dimPercent ?? 30
-
-  mutate({ phase: ShowPhase.LightsDimming })
-  updateCue('__lights-dim__', CueStatus.Active)
-
-  if (lightsClient) {
-    appendLog(`Lights → dim (${dimPercent}%)`)
-    await Promise.race([lightsClient.dim(lightIds, dimPercent), Bun.sleep(8000)]).catch(
-      () => {}
-    )
-    appendLog('Lights dim done')
-  }
-
-  if (signal.aborted) {
-    appendLog('Aborting after lights dim')
-    if (lightsClient) {
-      mutate({ phase: ShowPhase.LightsOn })
-      await Promise.race([lightsClient.setNormal(lightIds), Bun.sleep(8000)]).catch(
-        () => {}
-      )
-    }
-    mutate({ busy: false, phase: ShowPhase.Idle })
-    return
-  }
-
-  mutate({ phase: ShowPhase.Playing })
-  appendLog('Streaming to Apple TV…')
-
-  const initialCues = state.cues.map(c => ({ ...c, status: CueStatus.Pending }))
   const backend = getBackend(userConfig.streamTarget.type)
+  const { startupDelayMs, resumeDelayMs } = backend
+  const target = userConfig.streamTarget
+  const lightsCtx = loadLightsContext(userConfig)
+
   const totalDurationMs =
     (await probeFileDuration(outputPath).catch(() => null)) ?? undefined
 
   const videoCues = state.cues.filter(
     c =>
+      c.id !== '__stream-startup__' &&
       c.id !== '__lights-dim__' &&
       c.id !== '__lights-off__' &&
       c.id !== '__play-content__'
   )
-  const hasPerCueDurations = videoCues.every(
-    c => typeof c.durationMs === 'number' && c.durationMs > 0
-  )
-  let segOffset = 0
-  const cueTimeline =
-    hasPerCueDurations && videoCues.length > 0
-      ? videoCues.map(c => {
-          const startMs = segOffset
-          const endMs = segOffset + (c.durationMs ?? 0)
-          segOffset = endMs
-          return { id: c.id, label: c.label, startMs, endMs }
-        })
-      : totalDurationMs && videoCues.length > 0
-        ? (() => {
-            const perCue = totalDurationMs / videoCues.length
-            return videoCues.map((c, i) => ({
-              id: c.id,
-              label: c.label,
-              startMs: i * perCue,
-              endMs: (i + 1) * perCue
-            }))
-          })()
-        : []
-  const hasTimeline = cueTimeline.length > 0
+  const timeline = buildPlaybackTimeline(videoCues, totalDurationMs)
+  const hasTimeline = timeline.length > 0
+
+  mutate({ phase: ShowPhase.LightsDimming })
+  if (startupDelayMs > 0) {
+    updateCue('__stream-startup__', CueStatus.Waiting)
+  }
+  if (lightsCtx) {
+    updateCue('__lights-dim__', CueStatus.Active)
+  }
 
   let playbackStart = 0
   let tickTimer: ReturnType<typeof setInterval> | null = null
+  let resumeTriggered = false
+
   const applyTick = (elapsed: number) => {
+    if (
+      resumeDelayMs &&
+      totalDurationMs &&
+      elapsed >= totalDurationMs - resumeDelayMs &&
+      !resumeTriggered
+    ) {
+      resumeTriggered = true
+      updateCue('__play-content__', CueStatus.Waiting)
+      backend.resumePlayback?.(target as never).catch(() => {})
+    }
+
     const activeCueLabel = hasTimeline
-      ? (cueTimeline.find(c => elapsed >= c.startMs && elapsed < c.endMs)?.label ?? null)
+      ? (timeline.find(c => elapsed >= c.startMs && elapsed < c.endMs)?.label ?? null)
       : (videoCues[0]?.label ?? null)
+
     mutate({
       playback: {
         elapsedMs: elapsed,
@@ -202,7 +311,7 @@ export async function streamPrebuilt(
       ...(hasTimeline
         ? {
             cues: state.cues.map(c => {
-              const meta = cueTimeline.find(t => t.id === c.id)
+              const meta = timeline.find(t => t.id === c.id)
               if (!meta) {
                 return c
               }
@@ -223,38 +332,60 @@ export async function streamPrebuilt(
     })
   }
 
+  const initialCues = state.cues.map(c => ({ ...c, status: CueStatus.Pending }))
+
   try {
-    await backend.play(
-      outputPath,
-      userConfig.streamTarget as never,
-      signal,
-      totalDurationMs,
-      () => {
+    if (lightsCtx) {
+      appendLog(`Lights → dim (${lightsCtx.dimPercent}%)`)
+    }
+
+    await Promise.all([
+      lightsCtx
+        ? Promise.race([
+            lightsCtx.client.dim(lightsCtx.lightIds, lightsCtx.dimPercent),
+            Bun.sleep(8000)
+          ])
+            .catch(() => {})
+            .then(() => {
+              appendLog('Lights dim done')
+              updateCue('__lights-dim__', CueStatus.Done)
+            })
+        : Promise.resolve(),
+
+      backend.play(outputPath, target as never, signal, totalDurationMs, () => {
+        if (startupDelayMs > 0) {
+          updateCue('__stream-startup__', CueStatus.Done)
+        }
+        mutate({ phase: ShowPhase.Playing })
+        appendLog('Streaming…')
         playbackStart = Date.now()
-        updateCue('__lights-dim__', CueStatus.Done)
         applyTick(0)
         tickTimer = setInterval(() => applyTick(Date.now() - playbackStart), 1000)
-      }
-    )
+      })
+    ])
   } finally {
     if (tickTimer !== null) {
       clearInterval(tickTimer)
     }
     mutate({ playback: { elapsedMs: 0, durationMs: null, cueName: null } })
     await saveSession({ partial: false, outputPath, cues: initialCues, log: [] })
+
     mutate({ phase: ShowPhase.LightsOff, screen: AppScreen.ControlRoom })
     updateCue('__lights-off__', CueStatus.Active)
 
-    if (lightsClient) {
+    if (lightsCtx) {
       appendLog('Lights → 0%')
-      await Promise.race([lightsClient.off(lightIds), Bun.sleep(8000)]).catch(() => {})
+      await Promise.race([
+        lightsCtx.client.off(lightsCtx.lightIds),
+        Bun.sleep(8000)
+      ]).catch(() => {})
       appendLog('Lights off done')
     }
 
-    if (!signal.aborted) {
+    if (!signal.aborted && !resumeTriggered) {
       updateCue('__play-content__', CueStatus.Active)
       appendLog('Resuming content')
-      await backend.resumePlayback?.(userConfig.streamTarget as never)
+      await backend.resumePlayback?.(target as never)
     }
 
     mutate({
@@ -280,19 +411,19 @@ export async function runShowSequence(signal: AbortSignal) {
     throw new MarqueeError('No playback device configured.')
   }
 
-  const lightsConfig = userConfig.lights
-  const lightsPlugin = lightsConfig ? getLightsPluginFor(lightsConfig) : null
-  const lightsClient = lightsPlugin ? lightsPlugin.createClient(lightsConfig!) : null
-  const lightIds = lightsConfig?.controlledLightIds ?? []
-  const dimPercent = lightsConfig?.dimPercent ?? 30
+  const backend = getBackend(userConfig.streamTarget.type)
+  const lightsCtx = loadLightsContext(userConfig)
+  const needsResume = userConfig.streamTarget.type === 'appletv'
+  const dimPercent = lightsCtx?.dimPercent ?? 30
 
   mutate({ busy: true, error: null, phase: ShowPhase.LightsOn, cues: [] })
 
-  if (lightsClient) {
+  if (lightsCtx) {
     appendLog('Lights → bright')
-    await Promise.race([lightsClient.setNormal(lightIds), Bun.sleep(8000)]).catch(
-      () => {}
-    )
+    await Promise.race([
+      lightsCtx.client.setNormal(lightsCtx.lightIds),
+      Bun.sleep(8000)
+    ]).catch(() => {})
     appendLog('Lights bright done')
   }
 
@@ -308,55 +439,20 @@ export async function runShowSequence(signal: AbortSignal) {
     onLog: message => appendLog(message),
     onProgress: progress => mutate({ buildProgress: progress }),
     onDownloadsComplete: async partialCues => {
-      const videoCues = partialCues.map((c, i) => ({
-        id: String(i),
-        label: c.label,
-        durationMs: c.durationMs ?? null,
-        status: CueStatus.Pending
-      }))
-      const needsResume = userConfig.streamTarget?.type === 'appletv'
-      const mapped = lightsConfig
-        ? [
-            {
-              id: '__lights-dim__',
-              label: `Lights → ${dimPercent}%`,
-              durationMs: null,
-              status: CueStatus.Pending
-            },
-            ...videoCues,
-            {
-              id: '__lights-off__',
-              label: 'Lights → 0%',
-              durationMs: null,
-              status: CueStatus.Pending
-            },
-            ...(needsResume
-              ? [
-                  {
-                    id: '__play-content__',
-                    label: 'Play content',
-                    durationMs: null,
-                    status: CueStatus.Pending
-                  }
-                ]
-              : [])
-          ]
-        : [
-            ...videoCues,
-            ...(needsResume
-              ? [
-                  {
-                    id: '__play-content__',
-                    label: 'Play content',
-                    durationMs: null,
-                    status: CueStatus.Pending
-                  }
-                ]
-              : [])
-          ]
-
-      mutate({ cues: mapped })
-      await saveSession({ partial: true, outputPath: '', cues: mapped, log: state.log })
+      const partialMapped = buildShowCues({
+        videoCues: partialCues,
+        lightsCtx,
+        needsResume,
+        startupDelayMs: backend.startupDelayMs,
+        dimPercent
+      })
+      mutate({ cues: partialMapped })
+      await saveSession({
+        partial: true,
+        outputPath: '',
+        cues: partialMapped,
+        log: state.log
+      })
     }
   })
 
@@ -365,52 +461,13 @@ export async function runShowSequence(signal: AbortSignal) {
     return
   }
 
-  const videoCues = cues.map((c, i) => ({
-    id: String(i),
-    label: c.label,
-    durationMs: c.durationMs ?? null,
-    status: CueStatus.Pending
-  }))
-
-  const finalCues = lightsConfig
-    ? [
-        {
-          id: '__lights-dim__',
-          label: `Lights → ${dimPercent}%`,
-          durationMs: null,
-          status: CueStatus.Pending
-        },
-        ...videoCues,
-        {
-          id: '__lights-off__',
-          label: 'Lights → 0%',
-          durationMs: null,
-          status: CueStatus.Pending
-        },
-        ...(userConfig.streamTarget?.type === 'appletv'
-          ? [
-              {
-                id: '__play-content__',
-                label: 'Play content',
-                durationMs: null,
-                status: CueStatus.Pending
-              }
-            ]
-          : [])
-      ]
-    : [
-        ...videoCues,
-        ...(userConfig.streamTarget?.type === 'appletv'
-          ? [
-              {
-                id: '__play-content__',
-                label: 'Play content',
-                durationMs: null,
-                status: CueStatus.Pending
-              }
-            ]
-          : [])
-      ]
+  const finalCues = buildShowCues({
+    videoCues: cues,
+    lightsCtx,
+    needsResume,
+    startupDelayMs: backend.startupDelayMs,
+    dimPercent
+  })
 
   mutate({ buildProgress: null, cues: finalCues })
   await saveSession({ partial: false, outputPath, cues: finalCues, log: state.log })
@@ -454,56 +511,26 @@ export async function runDevShow(signal: AbortSignal) {
   appendLog(`Dev: concatenating ${segPaths.length} cached segment(s)…`)
   await concatSegments(segPaths, devTmpDir, outputPath)
 
-  const videoCues = segPaths.map((p, i) => ({
-    id: String(i),
+  const userConfig = await loadUserConfig()
+  const backend = userConfig?.streamTarget
+    ? getBackend(userConfig.streamTarget.type)
+    : null
+  const lightsCtx = userConfig ? loadLightsContext(userConfig) : null
+  const needsResume = userConfig?.streamTarget?.type === 'appletv'
+  const dimPercent = lightsCtx?.dimPercent ?? 30
+
+  const videoCues: VideoCueInput[] = segPaths.map((p, i) => ({
     label: basename(p, '.mp4').replace(/_[0-9a-f]+$/, ''),
-    durationMs: durations[i] ?? null,
-    status: CueStatus.Pending
+    durationMs: durations[i] ?? null
   }))
 
-  const userConfig = await loadUserConfig()
-  const lightsConfig = userConfig?.lights
-  const dimPercent = lightsConfig?.dimPercent ?? 30
-  const needsResume = userConfig?.streamTarget?.type === 'appletv'
-  const finalCues = lightsConfig
-    ? [
-        {
-          id: '__lights-dim__',
-          label: `Lights → ${dimPercent}%`,
-          durationMs: null,
-          status: CueStatus.Pending
-        },
-        ...videoCues,
-        {
-          id: '__lights-off__',
-          label: 'Lights → 0%',
-          durationMs: null,
-          status: CueStatus.Pending
-        },
-        ...(needsResume
-          ? [
-              {
-                id: '__play-content__',
-                label: 'Play content',
-                durationMs: null,
-                status: CueStatus.Pending
-              }
-            ]
-          : [])
-      ]
-    : [
-        ...videoCues,
-        ...(needsResume
-          ? [
-              {
-                id: '__play-content__',
-                label: 'Play content',
-                durationMs: null,
-                status: CueStatus.Pending
-              }
-            ]
-          : [])
-      ]
+  const finalCues = buildShowCues({
+    videoCues,
+    lightsCtx,
+    needsResume,
+    startupDelayMs: backend?.startupDelayMs ?? 0,
+    dimPercent
+  })
 
   mutate({ phase: ShowPhase.LightsOn, cues: finalCues })
   await streamPrebuilt(outputPath, signal)

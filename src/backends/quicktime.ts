@@ -5,6 +5,7 @@ import type { QuickTimeConfig, StreamingBackend } from './types.ts'
 export const quickTimeBackend: StreamingBackend<QuickTimeConfig> = {
   id: 'quicktime',
   label: 'QuickTime (macOS AirPlay)',
+  startupDelayMs: 0,
 
   async discover() {
     if (process.platform !== 'darwin') {

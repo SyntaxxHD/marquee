@@ -14,6 +14,7 @@ export enum ShowPhase {
 
 export enum CueStatus {
   Pending = 'pending',
+  Waiting = 'waiting',
   Active = 'active',
   Done = 'done',
   Error = 'error'
@@ -42,6 +43,7 @@ export interface CueItem {
   label: string
   durationMs: number | null
   status: CueStatus
+  concurrent?: boolean
 }
 
 export interface DeviceStatus {

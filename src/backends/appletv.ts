@@ -10,9 +10,14 @@ import { MarqueeError } from '../utils/errors.ts'
 
 import type { AppleTVConfig, StreamingBackend } from './types.ts'
 
+const STARTUP_DELAY_MS = 15_000
+const RESUME_DELAY_MS = 10_000
+
 export const appleTVBackend: StreamingBackend<AppleTVConfig> = {
   id: 'appletv',
   label: 'Apple TV (AirPlay)',
+  startupDelayMs: STARTUP_DELAY_MS,
+  resumeDelayMs: RESUME_DELAY_MS,
 
   async discover(timeoutMs = 5000) {
     const devices = await discoverAppleTVs(timeoutMs)
@@ -37,7 +42,14 @@ export const appleTVBackend: StreamingBackend<AppleTVConfig> = {
   },
 
   async play(filePath, config, signal, durationMs, onPlaybackStart) {
-    await playViaAppleTV(filePath, config, signal, durationMs, onPlaybackStart)
+    await playViaAppleTV(
+      filePath,
+      config,
+      signal,
+      durationMs,
+      onPlaybackStart,
+      STARTUP_DELAY_MS
+    )
   },
 
   async resumePlayback(config) {

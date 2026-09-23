@@ -7,6 +7,8 @@ export interface DiscoveredDevice {
 export interface StreamingBackend<TConfig extends { type: string }> {
   readonly id: TConfig['type']
   readonly label: string
+  readonly startupDelayMs: number
+  readonly resumeDelayMs?: number
   discover(timeoutMs?: number): Promise<DiscoveredDevice[]>
   setup(
     device: DiscoveredDevice,

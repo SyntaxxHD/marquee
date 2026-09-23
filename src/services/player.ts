@@ -171,7 +171,8 @@ export async function playViaAppleTV(
   appleTV: AppleTVTarget,
   signal?: AbortSignal,
   durationMs?: number,
-  onPlaybackStart?: () => void
+  onPlaybackStart?: () => void,
+  startupDelayMs = 15_000
 ): Promise<void> {
   const bins = await resolveBinaries()
   const { fileUrl, stopServer } = serveFile(filePath, appleTV.address)
@@ -182,7 +183,7 @@ export async function playViaAppleTV(
   )
 
   try {
-    await abortableSleep(15_000, signal)
+    await abortableSleep(startupDelayMs, signal)
     if (signal?.aborted) {
       return
     }
@@ -190,7 +191,7 @@ export async function playViaAppleTV(
     onPlaybackStart?.()
 
     const TWO_HOURS = 2 * 60 * 60 * 1000
-    await abortableSleep(Math.max(0, (durationMs ?? TWO_HOURS) - 15_000), signal)
+    await abortableSleep(Math.max(0, (durationMs ?? TWO_HOURS) - startupDelayMs), signal)
   } finally {
     proc.kill()
     stopServer()

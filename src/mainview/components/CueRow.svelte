@@ -12,6 +12,7 @@
 
   const STATE_MAP: Record<CueStatus, string> = {
     [CueStatus.Pending]: 'idle',
+    [CueStatus.Waiting]: 'active',
     [CueStatus.Active]: 'active',
     [CueStatus.Done]: 'done',
     [CueStatus.Error]: 'fault'
@@ -28,8 +29,14 @@
   }
 </script>
 
-<div class="row" class:is-active={cue.status === CueStatus.Active} class:is-done={cue.status === CueStatus.Done}>
-  <span class="index">{String(index + 1).padStart(2, '0')}</span>
+<div
+  class="row"
+  class:is-active={cue.status === CueStatus.Active}
+  class:is-waiting={cue.status === CueStatus.Waiting}
+  class:is-done={cue.status === CueStatus.Done}
+  class:is-concurrent={cue.concurrent}
+>
+  <span class="index">{cue.concurrent ? '┗' : String(index + 1).padStart(2, '0')}</span>
   <span class="label">{cue.label}</span>
   <span class="dur">{formatDuration(cue.durationMs)}</span>
   <StatusBadge state={STATE_MAP[cue.status]} label={cue.status} />
@@ -53,8 +60,16 @@
     background: rgba(212, 147, 10, 0.07);
   }
 
+  .row.is-waiting {
+    animation: pulse-bg 2s ease-in-out infinite;
+  }
+
   .row.is-done {
     opacity: 0.5;
+  }
+
+  .row.is-concurrent {
+    padding-left: calc(var(--u3) + 10px);
   }
 
   .index {
@@ -74,7 +89,8 @@
     text-overflow: ellipsis;
   }
 
-  .is-active .label {
+  .is-active .label,
+  .is-waiting .label {
     color: var(--amber);
   }
 
@@ -83,5 +99,10 @@
     font-size: 11px;
     color: var(--text-secondary);
     flex-shrink: 0;
+  }
+
+  @keyframes pulse-bg {
+    0%, 100% { background: rgba(212, 147, 10, 0.07); }
+    50% { background: rgba(212, 147, 10, 0.15); }
   }
 </style>

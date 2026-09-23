@@ -52,6 +52,7 @@ let confirmReject: ((e: Error) => void) | null = null
 let pinResolve: ((pin: string) => void) | null = null
 let restoredOutputPath: string | null = null
 let showAbort: AbortController | null = null
+let wakeLockProc: { kill: () => void } | null = null
 
 function pushState() {
   win?.webview.rpc?.send.appStateUpdate(state)
@@ -272,6 +273,7 @@ async function streamPrebuilt(outputPath: string, signal: AbortSignal): Promise<
     })
 
     setTimeout(() => mutate({ phase: ShowPhase.Idle }), 3000)
+    stopWakeLock()
   }
 }
 
@@ -428,6 +430,48 @@ async function runShowSequence(signal: AbortSignal) {
   await streamPrebuilt(outputPath, signal)
 }
 
+function startWakeLock() {
+  if (wakeLockProc) {
+    return
+  }
+
+  if (process.platform === 'darwin') {
+    wakeLockProc = Bun.spawn(['caffeinate', '-i', '-s'], {
+      stdout: 'ignore',
+      stderr: 'ignore',
+      stdin: 'ignore'
+    })
+  } else if (process.platform === 'linux') {
+    wakeLockProc = Bun.spawn(
+      [
+        'systemd-inhibit',
+        '--what=idle:sleep',
+        '--who=Marquee',
+        '--why=Preshow running',
+        '--mode=block',
+        'sleep',
+        'infinity'
+      ],
+      { stdout: 'ignore', stderr: 'ignore', stdin: 'ignore' }
+    )
+  } else if (process.platform === 'win32') {
+    wakeLockProc = Bun.spawn(
+      [
+        'powershell',
+        '-NoProfile',
+        '-Command',
+        'Add-Type -MemberDefinition \'[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint f);\' -Name K -Namespace W; [W.K]::SetThreadExecutionState(0x80000003); Read-Host'
+      ],
+      { stdout: 'ignore', stderr: 'ignore', stdin: 'ignore' }
+    )
+  }
+}
+
+function stopWakeLock() {
+  wakeLockProc?.kill()
+  wakeLockProc = null
+}
+
 function waitForConfirm(): Promise<void> {
   return new Promise((resolve, reject) => {
     confirmResolve = resolve
@@ -516,6 +560,7 @@ const rpc = defineElectrobunRPC<MarqueeRPC>('bun', {
         showAbort = new AbortController()
         const { signal } = showAbort
 
+        startWakeLock()
         runShowSequence(signal).catch(e => {
           if ((e as Error).message === 'Cancelled') {
             return
@@ -538,6 +583,7 @@ const rpc = defineElectrobunRPC<MarqueeRPC>('bun', {
           const { signal } = showAbort
 
           mutate({ busy: true })
+          startWakeLock()
           streamPrebuilt(outputPath, signal).catch(e => {
             mutate({ busy: false, error: (e as Error).message, phase: ShowPhase.Error })
           })
@@ -547,6 +593,7 @@ const rpc = defineElectrobunRPC<MarqueeRPC>('bun', {
       cancelShow: async () => {
         showAbort?.abort()
         showAbort = null
+        stopWakeLock()
         confirmReject?.(new MarqueeError('Cancelled'))
         confirmResolve = null
         confirmReject = null
@@ -682,6 +729,7 @@ const rpc = defineElectrobunRPC<MarqueeRPC>('bun', {
         const { signal } = showAbort
 
         mutate({ phase: ShowPhase.LightsOn, cues: finalCues })
+        startWakeLock()
         streamPrebuilt(outputPath, signal).catch(e => {
           if ((e as Error).message === 'Cancelled') {
             return

@@ -18,6 +18,8 @@ export default tseslint.config(
         'error',
         {
           groups: ['builtin', 'external', 'internal', 'parent', 'sibling', 'index'],
+          pathGroups: [{ pattern: 'bun', group: 'external', position: 'before' }],
+          pathGroupsExcludedImportTypes: [],
           'newlines-between': 'always',
           alphabetize: { order: 'asc', caseInsensitive: true }
         }

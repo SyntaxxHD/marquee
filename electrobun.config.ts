@@ -16,6 +16,8 @@ export default {
     copy: {
       'dist/index.html': 'views/mainview/index.html',
       'dist/assets': 'views/mainview/assets',
+      'dist/favicon.svg': 'views/mainview/favicon.svg',
+      'dist/tray-icon.svg': 'views/mainview/tray-icon.svg',
       'vendor/ffmpeg': 'vendor/ffmpeg',
       'vendor/ffprobe': 'vendor/ffprobe',
       'vendor/yt-dlp': 'vendor/yt-dlp',

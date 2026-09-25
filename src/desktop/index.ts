@@ -54,7 +54,7 @@ if (process.argv.includes('--server')) {
   await initFromConfig()
 
   if (process.platform !== 'linux') {
-    const tray = new Tray({ title: 'Marquee' })
+    const tray = new Tray({ image: 'views://mainview/tray-icon.svg', template: true })
     tray.setMenu([
       { type: 'normal', label: 'Marquee Server', action: 'noop' },
       { type: 'normal', label: 'Open in Browser', action: 'open' },
@@ -175,7 +175,7 @@ if (process.argv.includes('--server')) {
     initFromConfig().catch(console.error)
   })
 
-  tray = new Tray({ title: 'Marquee' })
+  tray = new Tray({ image: 'views://mainview/tray-icon.svg', template: true })
   desktopTrayMenu()
 
   tray.on('tray-clicked', async (e: unknown) => {

@@ -1,6 +1,7 @@
-import type { Server, ServerWebSocket } from 'bun'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+
+import type { Server, ServerWebSocket } from 'bun'
 
 import type { AppState, ShowPhase } from '../shared/app-state.ts'
 import type { MarqueeRPC } from '../shared/rpc-schema.ts'

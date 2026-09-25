@@ -1,17 +1,47 @@
-import type { BrowserWindow } from 'electrobun/main'
-
 import { INITIAL_STATE } from '../shared/app-state.ts'
-import type { AppState, CueStatus } from '../shared/app-state.ts'
+import type { AppState, CueStatus, ShowPhase } from '../shared/app-state.ts'
 
-export let win: BrowserWindow | null = null
-export let state: AppState = structuredClone(INITIAL_STATE)
-
-export function setWindow(w: BrowserWindow) {
-  win = w
+export type StateBroadcaster = {
+  appStateUpdate(payload: AppState): void
+  setupProgress(payload: { message: string }): void
+  phaseChanged(payload: { phase: ShowPhase }): void
+  pairingPinRequired(payload: { protocol: string }): void
 }
 
+let electrobunBroadcaster: StateBroadcaster | null = null
+let wsBroadcaster: StateBroadcaster | null = null
+
+export function registerElectrobunBroadcaster(b: StateBroadcaster) {
+  electrobunBroadcaster = b
+}
+
+export function registerWsBroadcaster(b: StateBroadcaster | null) {
+  wsBroadcaster = b
+}
+
+export const send: StateBroadcaster = {
+  appStateUpdate: p => {
+    electrobunBroadcaster?.appStateUpdate(p)
+    wsBroadcaster?.appStateUpdate(p)
+  },
+  setupProgress: p => {
+    electrobunBroadcaster?.setupProgress(p)
+    wsBroadcaster?.setupProgress(p)
+  },
+  phaseChanged: p => {
+    electrobunBroadcaster?.phaseChanged(p)
+    wsBroadcaster?.phaseChanged(p)
+  },
+  pairingPinRequired: p => {
+    electrobunBroadcaster?.pairingPinRequired(p)
+    wsBroadcaster?.pairingPinRequired(p)
+  }
+}
+
+export let state: AppState = structuredClone(INITIAL_STATE)
+
 export function pushState() {
-  win?.webview.rpc?.send.appStateUpdate(state)
+  send.appStateUpdate(state)
 }
 
 export function mutate(patch: Partial<AppState>) {

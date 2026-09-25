@@ -62,6 +62,12 @@ export type MarqueeRPC = {
         params: { pluginId: string; ip: string; credentials: string }
         response: LightInfo[]
       }
+      enableServerMode: {
+        params: { port: number; bind: 'localhost' | 'network' }
+        response: { url: string }
+      }
+      disableServerMode: { params: undefined; response: void }
+      setAutostart: { params: { enabled: boolean }; response: void }
     }
     messages: {
       logMessage: { level: string; message: string }

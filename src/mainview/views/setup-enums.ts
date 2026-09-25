@@ -2,7 +2,8 @@ export enum Section {
   Playback = 'playback',
   Content = 'content',
   Output = 'output',
-  Lights = 'lights'
+  Lights = 'lights',
+  Deployment = 'deployment'
 }
 
 export enum SectionState {

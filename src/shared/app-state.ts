@@ -83,6 +83,8 @@ export interface AppState {
   buildProgress: BuildProgress | null
   error: string | null
   restoredPartial: boolean
+  serverMode: boolean
+  serverUrl: string | null
 }
 
 export const INITIAL_STATE: AppState = {
@@ -97,5 +99,7 @@ export const INITIAL_STATE: AppState = {
   log: [],
   buildProgress: null,
   error: null,
-  restoredPartial: false
+  restoredPartial: false,
+  serverMode: false,
+  serverUrl: null
 }

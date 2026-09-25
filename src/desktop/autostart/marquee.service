@@ -1,0 +1,11 @@
+[Unit]
+Description=Marquee Cinema Pre-Show Server
+After=network.target
+
+[Service]
+ExecStart={{EXEC_START}}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

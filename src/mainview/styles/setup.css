@@ -1,0 +1,96 @@
+.section-wrap {
+  max-width: 560px;
+  padding: var(--u8) var(--u8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--u4);
+}
+
+.section-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--u4);
+  margin-bottom: var(--u2);
+}
+
+.section-head-icon {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.section-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 var(--u1);
+  font-family: var(--font-sans);
+}
+
+.section-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.card-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u2);
+}
+
+.step-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--u2);
+}
+
+.centered {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--u3);
+  padding: var(--u6) 0;
+}
+
+.hint-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0 0 var(--u3);
+  line-height: 1.5;
+}
+
+.hint-text-sm {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0 0 var(--u3);
+}
+
+.error-msg {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: #ef5350;
+  margin: var(--u2) 0 0;
+}
+
+.empty-state {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+  padding: var(--u4) 0;
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--u2) 0;
+}
+
+.field-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}

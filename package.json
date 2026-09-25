@@ -13,7 +13,8 @@
     "prepare": "husky",
     "dev": "hutch run dev",
     "dev:hmr": "hutch run dev:hmr",
-    "build:app": "hutch run build"
+    "build:app": "hutch run build",
+    "build:server": "bun x vite build && bun build --compile --target=bun-linux-x64 src/server/index.ts --outfile release/marquee-server-linux-x64"
   },
   "dependencies": {
     "@ffprobe-installer/ffprobe": "^2.1.2",

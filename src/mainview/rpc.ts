@@ -1,3 +1,4 @@
+import type { RPCTransport } from 'electrobun/rpc'
 import { Electroview } from 'electrobun/view'
 import { writable } from 'svelte/store'
 
@@ -25,4 +26,60 @@ export const rpc = Electroview.defineRPC<MarqueeRPC>({
   }
 })
 
-export const ev = new Electroview({ rpc })
+const isElectrobun =
+  typeof window !== 'undefined' &&
+  !!(window as unknown as Record<string, unknown>).__electrobunWebviewId
+
+if (isElectrobun) {
+  new Electroview({ rpc })
+} else {
+  rpc.setTransport(createWsTransport(`ws://${window.location.host}/ws`))
+}
+
+function createWsTransport(wsUrl: string): RPCTransport {
+  let ws: WebSocket | null = null
+  let handler: ((msg: unknown) => void) | undefined
+  const queue: string[] = []
+  let retryDelay = 500
+
+  function connect() {
+    ws = new WebSocket(wsUrl)
+
+    ws.addEventListener('open', () => {
+      retryDelay = 500
+      for (const msg of queue.splice(0)) {
+        ws!.send(msg)
+      }
+    })
+
+    ws.addEventListener('message', ev => {
+      if (typeof ev.data !== 'string') {
+        return
+      }
+      const parsed = JSON.parse(ev.data) as unknown
+      handler?.(parsed)
+    })
+
+    ws.addEventListener('close', () => {
+      const delay = retryDelay
+      retryDelay = Math.min(retryDelay * 2, 10_000)
+      setTimeout(connect, delay)
+    })
+  }
+
+  connect()
+
+  return {
+    send(message: unknown) {
+      const msg = JSON.stringify(message)
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(msg)
+      } else {
+        queue.push(msg)
+      }
+    },
+    registerHandler(h: (msg: unknown) => void) {
+      handler = h
+    }
+  }
+}

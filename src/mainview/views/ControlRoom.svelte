@@ -163,7 +163,7 @@
               </Button>
             {/if}
             <IconButton icon={Upload} label="Stream file" onclick={handleStreamFile} />
-            <IconButton icon={Zap} label="Dev run (cached)" onclick={handleDevStart} />
+            <!-- <IconButton icon={Zap} label="Dev run (cached)" onclick={handleDevStart} /> -->
             <IconButton icon={Eraser} label="Clear cache" onclick={handleClearCache} />
             <IconButton icon={Settings} label="Change device" onclick={handleSetup} />
           {/if}

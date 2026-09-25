@@ -41,6 +41,6 @@ export default {
     win: { bundleCEF: false, icon: 'assets/marquee-windows.ico' }
   },
   runtime: {
-    exitOnLastWindowClosed: true
+    exitOnLastWindowClosed: false
   }
 } satisfies ElectrobunConfig

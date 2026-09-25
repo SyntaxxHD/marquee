@@ -27,6 +27,9 @@ export interface UserConfig {
   outputResolution: OutputResolution
   outputFps: OutputFps
   lights: LightsConfig | null
+  serverPort?: number
+  serverBind?: 'localhost' | 'network'
+  autostart?: boolean
 }
 
 export interface Config {

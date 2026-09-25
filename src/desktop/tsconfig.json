@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "rootDir": "../..",
+    "paths": {
+      "$shared/*": ["../shared/*"],
+      "electrobun/main": ["../../.hutch/devkit/api/sdks/main/index.ts"],
+      "electrobun/rpc": ["../../.hutch/devkit/api/sdks/main/entries/rpc.ts"],
+      "electrobun": ["../../.hutch/devkit/api/sdks/main/index.ts"]
+    }
+  },
+  "include": ["./**/*"],
+  "exclude": []
+}

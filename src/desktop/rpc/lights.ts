@@ -13,7 +13,7 @@ import {
 } from '../../sources/registry.ts'
 import type { AdSourceConfig, TrailerSourceConfig } from '../../sources/types.ts'
 import { SourceKind } from '../../sources/types.ts'
-import { mutate, state, win } from '../state.ts'
+import { mutate, state, send } from '../state.ts'
 
 type _R = MarqueeRPC['bun']['requests']
 type _Subset<K extends keyof _R> = {
@@ -48,7 +48,7 @@ export const lightsHandlers = {
   pairLightBridge: async ({ pluginId, ip }: _R['pairLightBridge']['params']) => {
     const plugin = getLightsPlugin(pluginId)
     return plugin.pair(ip, () => {
-      win?.webview.rpc?.send.setupProgress({ message: 'Waiting for link button…' })
+      send.setupProgress({ message: 'Waiting for link button…' })
     })
   },
 

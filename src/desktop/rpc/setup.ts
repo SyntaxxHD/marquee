@@ -3,7 +3,7 @@ import type { StreamTargetConfig } from '../../backends/types.ts'
 import { loadUserConfig, saveUserConfig } from '../../config.ts'
 import type { MarqueeRPC } from '../../shared/rpc-schema.ts'
 import { initFromConfig, resolvePin, waitForPin } from '../show.ts'
-import { mutate, state, win } from '../state.ts'
+import { mutate, state, send } from '../state.ts'
 
 type _R = MarqueeRPC['bun']['requests']
 type _Subset<K extends keyof _R> = {
@@ -25,10 +25,10 @@ export const setupHandlers = {
     const config = await backend.setup(
       device,
       message => {
-        win?.webview.rpc?.send.setupProgress({ message })
+        send.setupProgress({ message })
       },
       async protocol => {
-        win?.webview.rpc?.send.pairingPinRequired({ protocol })
+        send.pairingPinRequired({ protocol })
         return waitForPin()
       }
     )
